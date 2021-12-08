@@ -43,7 +43,7 @@ LStartM	EQU	$C
 LStartL	EQU	$D
 
 emu	EQU	0	; 1=emulate HDD access timings by adding NOPs
-ram_limit	EQU	256*1024	; 0=no limit, other=malloc size
+ram_limit	EQU	260*1024	; 0=no limit, other=malloc size
 blitter	EQU	1	; 1=use blitter 0=emulate blitter (not complete, for debug purpose only)
 minimum_load EQU	128*400	; minimum size of a disk read (to optimize FREADs)
 loop_play	EQU	1
@@ -52,11 +52,10 @@ monochrome EQU 0
 line_length EQU 	160
 horz_shift	 EQU	1
 intro_shift EQU	0
-vbl_per_frame EQU	2	; 25fps
 nb_frames	EQU	3821	; number of frames in file
 loop_frame EQU	100
 
-	MACRO	DMASNDST
+DMASNDST	MACRO
 	move.l	\1,d0
 	swap	d0
 	move.b	d0,$ffff8903.w
@@ -67,7 +66,7 @@ loop_frame EQU	100
 	move.b	d1,$ffff8907.w
 	ENDM
 
-	MACRO	DMASNDED
+DMASNDED	MACRO
 	move.l	\1,d0
 	swap	d0
 	move.b	d0,$ffff890F.w
@@ -78,7 +77,7 @@ loop_frame EQU	100
 	move.b	d1,$ffff8913.w
 	ENDM
 
-	MACRO	emu_hdd_lag
+emu_hdd_lag MACRO
 	IFNE	emu
 	move.l	d6,d5
 .wait_emu	nop
@@ -89,7 +88,7 @@ loop_frame EQU	100
 	ENDM
 
 
-	MACRO	color_debug
+color_debug MACRO
 	
 	tst.w	debug_color
 	beq.s	.\@
@@ -202,11 +201,11 @@ hwinits
 
 	move.w	#$2700,sr
 
-	movem.l	$ffff8240.w,d0-d7
-	movem.l	d0-d7,old_palette
+	;movem.l	$ffff8240.w,d0-d7
+	;movem.l	d0-d7,old_palette
 
-	move.b	$ffff8260.w,old_rez
-	move.b	$ffff820a.w,old_hz
+	;move.b	$ffff8260.w,old_rez
+	;move.b	$ffff820a.w,old_hz
 	moveq	#0,d5		; reset vbl counter
 
 	lea	old_ints,a0
@@ -229,9 +228,9 @@ hwinits
 	move.l	#dummy_rte,$70.w	; temporary vbl
 	move.l	#dummy_rte,$68.w	; temporary hbl
 
-	move	#$2300,sr
-	stop	#$2300	; wait for vbl
-	bset.b	#1,$ffff820a.w	; 50Hz
+	;move	#$2300,sr
+	;stop	#$2300	; wait for vbl
+	;bset.b	#1,$ffff820a.w	; 50Hz
 	; sv2k17 60hz beam switch wait
 	;pea	s_waitfor60	; print wait message
 	;move.w	#9,-(sp)
@@ -240,9 +239,9 @@ hwinits
 	;move.w	#8,-(sp)	; press a key
 	;trap	#1
 	;addq	#2,sp
-	stop	#$2300	; wait for vbl
-	clr.b	$ffff8260.w	; lowrez
-	move.w	#$2700,sr
+	;stop	#$2300	; wait for vbl
+	;clr.b	$ffff8260.w	; lowrez
+	;move.w	#$2700,sr
 
 	; STE pal
 ;	lea	palette,a0
@@ -262,9 +261,7 @@ hwinits
 	or.b	#%01000000,$fffffa15.w	; enable ACIA
 	bclr	#3,$fffffa17.w
 
-	move.w	#$2300,sr
-
-	; find the ST physical screen
+	; find the ST video address for debug purpose
 	move.b	$ffff8201.w,screen_debug_ptr+1
 	move.b	$ffff8203.w,screen_debug_ptr+2
 	move.b	$ffff820d.w,screen_debug_ptr+3
@@ -282,9 +279,34 @@ hwinits
 	move.b	#1,$fffffa1f.w
 	move.b	#8,$fffffa19.w
 
-	move.w	vbl_count,d0
-	addq	#2,d0
-	move.w	d0,next_refresh
+	bsr	set_palette
+
+	; copy image to video RAM with the blitter
+	move.w	#240,$ffff8a38.w ; y count
+	move.w	#160,$ffff8a36.w  ; x word count
+	move.w	#2,$ffff8a20.w   ; src x byte increment
+	move.w	#2,$ffff8a22.w   ; src y byte increment
+	move.w	#2,$ffff8a2e.w ; dst x increment
+	move.w     #322,$ffff8a30.w ; dst y increment
+	clr.b	$ffff8a3d.w    ; skew
+	move.w	#-1,$ffff8a28.w ; endmask1
+	move.w	#-1,$ffff8a2a.w ; endmask2
+	move.w	#-1,$ffff8a2c.w ; endmask3
+	move.w	#$0203,$ffff8a3a.w    ; HOP+OP: $010F=1fill/$0203=copy
+	move.l	#bmpdata,$ffff8a24.w   ; src
+	move.l	screen_display_ptr,$ffff8a32.w   ; dest
+	move.b	#%11000000,$ffff8a3c.w ; start HOG
+	nop
+	nop
+	move.w	#240,$ffff8a38.w ; y count
+	move.w	#160,$ffff8a36.w  ; x word count
+	move.l	#bmpdata,$ffff8a24.w   ; src
+	move.l	screen_render_ptr,$ffff8a32.w   ; dest
+	move.b	#%11000000,$ffff8a3c.w ; start HOG
+	nop
+	nop
+
+	move.w	#$2300,sr
 
 
 *** MAIN LOOP
@@ -380,7 +402,7 @@ check_room
 	beq	enableplay
 	bsr	first_refresh
 
-enableplay	move.w	vbl_count,next_refresh
+enableplay
 	clr.w	b_buffering_lock	; enable play if previously disabled
 	move.b	#%11,$ffff8901.w	; restart sound
 	rts			; go to check_room or wait_for_play_end
@@ -438,7 +460,7 @@ loading	move.w	#-1,b_loading
 .idxloop	move.l	a2,(a0)+
 	move.w	(a1)+,d0
 	add.l	d0,a2
-	dbra.s	d7,.idxloop
+	dbra	d7,.idxloop
 	move.l	a2,load_ptr
 	move.l	a1,idx_load
 	move.l	a0,idx_loaded
@@ -468,7 +490,7 @@ wait_for_play_end
 *** END
 
 video_end	
-	*** Close BA.RUN
+	*** Close audio file
 	move.w	file_handle,-(sp)
 	move.w	#$3e,-(sp)
 	addq.l	#4,sp
@@ -483,14 +505,15 @@ video_end
 	move.l	#dummy_rte,$70.w	; temporary vbl
 	move.l	#dummy_rte,$68.w	; temporary hbl
 	move.w	#$2300,sr		; wait for vbl
-	movem.l	old_palette,d0-d7
-	movem.l	d0-d7,$ffff8240.w
-	move.b	old_rez,$ffff8260.w
-	move.b	old_hz,$ffff820a.w
+	;movem.l	old_palette,d0-d7
+	;movem.l	d0-d7,$ffff8240.w
+	;move.b	old_rez,$ffff8260.w
+	;move.b	old_hz,$ffff820a.w
 	;move.b	old_screen+1,$ffff8201.w
 	;move.b	old_screen+2,$ffff8203.w
 	;move.b	old_screen+3,$ffff820d.w
-	move.w	#$2700,sr
+	move.l	old_screen,screen_display_ptr
+	bsr	set_videoaddr
 
 	lea	old_ints,a0
 	move.l	(a0)+,$68.w
@@ -739,6 +762,42 @@ set_screen
 	;move.b	screen_display_ptr+3,$ffff820d.w
 .end	rts
 
+; 18-bits palette so each component must be >>2	
+set_palette	
+	move.b	#$FF,DAC_PEL ; pixel mask
+	move.w	#255,d0
+	lea	palette(pc),a0
+	move.b	#0,DAC_IW	; start pal index #0
+.pal	move.b	(a0)+,d1
+	move.b	(a0)+,d2
+	move.b	(a0),d3
+	addq	#2,a0	; skip 4th byte
+	lsr.b	#2,d1
+	lsr.b	#2,d2
+	lsr.b	#2,d3
+	move.b	d3,DAC_D	; write R
+	move.b	d2,DAC_D	; write G
+	move.b	d1,DAC_D	; write B
+	dbra	d0,.pal
+	rts
+
+	; poll vsync bit
+vsync	btst	#3,INSTATUS1
+	bne.s	vsync
+.vs	btst	#3,INSTATUS1
+	beq.s	.vs
+	rts
+
+	; set screen base address
+set_videoaddr
+	move.b	#LStartL,CRTC_I
+	move.b	screen_display_ptr+3,CRTC_D
+	move.b	#LStartM,CRTC_I
+	move.b	screen_display_ptr+2,CRTC_D
+	move.b	#LStartH,CRTC_I
+	move.b	screen_display_ptr+1,CRTC_D
+	rts
+
 *** MISC
 
 ikbd	lea	$fffffc00.w,a1
@@ -815,7 +874,7 @@ textprint	lea	smallfont(pc),a2
 
 	IFEQ	monochrome
 	move.l	a1,d5
-	btst.w	#0,d5
+	btst	#0,d5
 	bne.s	.odd
 	ENDC
 	subq	#7,a1
@@ -836,7 +895,7 @@ itoahex	lea	hexstr,a2
 	and.w	d2,d1
 	move.b	(a2,d1.w),-(a0)
 	lsr.l	#4,d0
-	dbra.s	d3,.loop
+	dbra	d3,.loop
 	rts
 
 
@@ -849,8 +908,6 @@ hexstr	dc.b	'0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F'
 	even
 
 vbl_count	dc.w	0
-next_refresh
-	dc.w	0
 b_loading	dc.w	0
 b_buffering_lock
 	dc.w	-1
@@ -859,11 +916,11 @@ b_first_refresh
 b_fileerror
 	dc.w	0
 screen_render_ptr
-	dc.l	bufscreen
+	dc.l	SCREEN
 screen_display_ptr 
-	dc.l	bufscreen+(320*240)
+	dc.l	SCREEN+(640*240)
 screen_debug_ptr
-	dc.l	bufscreen
+	dc.l	buf_nothing_end
 file_handle
 	dc.w	0
 debug_color
@@ -898,9 +955,9 @@ swap_buffers
 
 
 s_vid_filename
-	dc.b	"AUDIO.DAT",0
+	dc.b	"F:\ANKHAM\AUDIO.DAT",0
 s_idx_filename
-	dc.b	"AUDIO.IDX",0
+	dc.b	"F:\ANKHAM\AUDIO.IDX",0
 s_debug_load
 	dc.b	"LOAD ",0
 s_debug_play
@@ -927,6 +984,9 @@ SmallTab	dc.b	0,38,0,48,0,0,0,42,43,44,0,46,41,45,47,0
 	dc.b	28,29,30,31,32,33,34,35,36,37,38,39,40,41
 	even
 
+image	incbin	"backgr.bmp"
+palette	EQU	image+$36
+bmpdata	EQU	image+$3FB
 
 
 	section	bss
@@ -934,17 +994,13 @@ SmallTab	dc.b	0,38,0,48,0,0,0,42,43,44,0,46,41,45,47,0
 	even
 Save_Mfp	ds.l	16
 Save_Vec	ds.l	17
+old_screen
+	ds.l	1
 old_ints	ds.b	25
-	even
-old_palette
-	ds.w	16
-old_screen	ds.l	1
-old_rez	ds.b	1
-old_hz	ds.b	1
 	even
 vid_index	ds.w	nb_frames+1
 play_index	ds.l	nb_frames+1
 buf_nothing
 	ds.w	40
 buf_nothing_end
-bufscreen	ds.w	32000
+
