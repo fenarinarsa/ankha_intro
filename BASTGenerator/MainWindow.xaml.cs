@@ -115,14 +115,15 @@ namespace BASTGenerator
 
         uint target_nb_bitplanes = 4; // 1 to 4
         // uncomment for color
-        double fps = 24; // to fit STE ntsc frequency and avoid 4 'unchanged frames'
-        double target_fps = pal_fps/2; // should be >= fps
+        double fps = vga_fps/2;
+        double target_fps = vga_fps/2; // should be >= fps
         // uncomment for monochrome
         //double fps = 30;
         //double target_fps = monochrome_fps; // should be >= fps
+        bool audio_only = true; // true if no video
         bool audio_mux_only = false; // set to true if you only changed audio
         int first_pic = 0;
-        int last_pic = 3670;
+        int last_pic = 3819;
         // set to true if you generate a monochrome highres animation. target bitplanes will be forced to 1
         bool highres = false;
 
@@ -133,8 +134,8 @@ namespace BASTGenerator
         // audio
         int original_samplesize = 2;   // original should always be 16 bits PCM
         int ste_channels = 2;          // 1=mono, 2=stereo (also applies to the input wav file)
-        int soundfrq = 25033;       // audio frequency (+/-1Hz depending on the STE main clock). divide by 2 for 25kHz, 4 for 12kHz, etc.
-        String soundfile = @"D:\ankha\ankha_25k_small_16b.wav"; // Original sound file (PCM 16 bit little endian without any tag)
+        int soundfrq = 50066;       // audio frequency (+/-1Hz depending on the STE main clock). divide by 2 for 25kHz, 4 for 12kHz, etc.
+        String soundfile = @"D:\ankha\ankham.wav"; // Original sound file (PCM 16 bit little endian without any tag)
 
         // Temp files created in step 1
         String degas_source = @"D:\ankha\ankha{0}bc\ak_";
@@ -306,61 +307,13 @@ namespace BASTGenerator
 
         private void bw_ProgressChanged2(object sender, ProgressChangedEventArgs e)
         {
-            uint[] pixelData = (uint[])e.UserState;
-            WriteableBitmap modifiedImage = new WriteableBitmap((highres?640:320), (highres ? 400 : 200), 72, 72, PixelFormats.Bgra32, BitmapPalettes.WebPalette);
-            modifiedImage.WritePixels(new Int32Rect(0, 0, (highres ? 640 : 320), (highres ? 400 : 200)), pixelData, (highres ? 640 : 320) * 4, 0);
-            image.Source = modifiedImage;   
+
         }
 
 
         private void bw_ProgressChanged(object sender, ProgressChangedEventArgs e)
         {
-            Object[] par = (Object[])e.UserState;
-            String progress = (String)par[0];
-            int[] status = (int[])par[1];
-
-            BitmapImage bimg = new BitmapImage();
-            bimg.BeginInit();
-            bimg.UriSource = new Uri(progress);
-            bimg.EndInit();
-            image.Source = bimg;
-
-            WriteableBitmap modifiedImage = (highres ? 
-                new WriteableBitmap((640 / 16), 400, 72, 72, PixelFormats.Bgra32, BitmapPalettes.WebPalette):
-                new WriteableBitmap((320 / 16) * 4, 200, 72, 72, PixelFormats.Bgra32, BitmapPalettes.WebPalette)
-                );
-
-            int h = modifiedImage.PixelHeight;
-            int w = modifiedImage.PixelWidth;
-            uint[] pixelData = new uint[w * h];
-            int widthInByte = 4 * w;
-
-            modifiedImage.CopyPixels(pixelData, widthInByte, 0);
-
-            // colors used to display status
-            for (int i = 0; i < pixelData.Length; i++) {
-                switch (status[i]) {
-                    case 1: pixelData[i] = 0xaaff0000; break; // direct value
-                    case 2: pixelData[i] = 0xaa00ff00; break; // register value
-                    case 3: pixelData[i] = 0xaa0000ff; break; // blitter optimization
-                    case 10: pixelData[i] = 0xaa0000ff; break; // blitter waste
-                    case 11: pixelData[i] = 0xaaff00ff; break; // blitter instead of direct value
-                    case 12: pixelData[i] = 0xaaff00ff; break; // blitter instead of register value
-                    case 13: pixelData[i] = 0xaaffff00; break; // blitter waste
-                    case 15:
-                    case 16:
-                    case 17:
-                    case 18: pixelData[i] = 0xaa0000ff; break; // blitter fill
-                    default: pixelData[i] = 0x0; break; // no change
-                }
-
-            }
-
-            modifiedImage.WritePixels(new Int32Rect(0, 0, w, h), pixelData, widthInByte, 0);
-
-            image1.Source = modifiedImage;
-
-            image1.Dispatcher.Invoke(DispatcherPriority.Render, EmptyDelegate);
+           
         }
 
         private static Action EmptyDelegate = delegate () { };
@@ -371,24 +324,13 @@ namespace BASTGenerator
             int trim_start = first_pic;
             int nb_files = last_pic + 1;
 
-            bool opt_addq = true;
-            bool opt_move_word = true;
-            bool opt_register_long = true;
-            bool opt_register_word = true;
-            bool opt_blitter = true;
-            bool opt_blitter_fill_horizgaps = true;
-            bool opt_blitter_fill_vertgaps = true;
             bool write_file = true;
             
             byte[] source = new byte[60000];
             int[] frame = new int[17000];
             int[] status_original = new int[17000];
             int[] status = new int[17000];
-            int[] status_blitter = new int[17000];
-            int[] status_softwareonly = new int[17000];
-            int[] status_tmpblitter = new int[17000];
-            int[] status_blittersoftware = new int[17000];
-            int[] status_tmpblittersoftware = new int[17000];
+
             int[] old_frame = new int[17000];
             int[] old_frame2 = new int[17000];
             int[] old_frame3;
@@ -398,9 +340,6 @@ namespace BASTGenerator
 
             byte[] tmpbuf = new byte[50];
 
-            //var palettes = new Dictionary<int, byte[]>();
-            byte[] lastpalette = new byte[32];
-            byte[] newpalette = new byte[32];
 
             //int final_framecount=(int)(((nb_files-trim_start)/(double)fps)*target_fps);
             double frame_step = target_fps / (double)fps;
@@ -438,140 +377,18 @@ namespace BASTGenerator
                     // 13 = copied with blitter but no modification (blitter "gap" optimization)
                     // >15 = blitter fill
 
-                    using (var fst = new FileStream(degas_source + pic.ToString("D5") + (highres ? ".pi3" : ".pi1"), FileMode.Open, FileAccess.Read)) {
-                        fst.Seek(2, SeekOrigin.Begin);
-                        fst.Read(newpalette, 0, 32);
-                        fst.Read(source, 0, 32000);
-                    }
-
-                    // Check for palette difference
-                    // (ankha color patch)
-                    // if the palette changed, then record it.
-                    bool palchange = false;
-                    for (int i = 0; i < newpalette.Length; i++) {
-                        if (newpalette[i] != lastpalette[i]) {
-                            palchange = true;
-                        }
-                        lastpalette[i] = newpalette[i];
-                    }
-                    if (palchange) {
-                        newpalette[0] = (byte)(final_pic >> 8);
-                        newpalette[1] = (byte)(final_pic & 0xFF);
-                        palfile.Write(newpalette, 0, 2);    // frame index
-                        palfile.Write(lastpalette, 0, 32);  // new palette
-                    }
-
-
                     // copy into int tab for easier comparisons between 16-bits words
                     // status=1 if there is a difference with the previous frame
-                    bool unchanged = true;
-                    for (int i = 0; i < frame.Length; i++) {
-                        frame[i] = (int)(source[i * 2] << 8) + (int)source[i * 2 + 1];
-                        if (frame[i] != old_frame[i]) status_original[i] = 1;
-                        if (frame[i] != old_frame2[i]) unchanged = false;
-                    }
 
-                    bool usehardware = false;
-                    byte[] blitterOnly = null;
-                    byte[] softwareOnly = null;
-                    byte[] softwareAfterBlitter = null;
-
-                    if (unchanged) {
-                        // very specific optimization: the frame hasn't changed since the very previous one (not the -2 frame since we use double buffering)
-                        // in that case we rollback the buffers by -1 and put a $0000 word into the file
-                        // to indicate to the player that it needs to hold the previous frame and NOT swap the display/render buffers
-                        frame = old_frame2;
-                        old_frame2 = old_frame;
-                        old_frame = old_frame3;
-                        Console.WriteLine("unchanged");
-
-                    }
-                    else {
-                        //Array.Copy(status, status_original, status.Length);
-                        Array.Copy(status_original, status_softwareonly, status.Length);
-                        softwareOnly = softwareCheck(ref status_softwareonly, ref source, ref frame, opt_move_word, opt_register_long, opt_register_word, opt_addq);
-                        blitterOnly = softwareOnly;
-                        softwareAfterBlitter = new byte[0];
-                        int bitplanes = 0;
-                        if (opt_blitter) {
-                            int maxsize = 1000 * 1024;
-                            int currentsize = 0;
-                            foreach (int bpp in new int[] { 1, 2, 4 }) {
-                                Array.Copy(status_original, status_tmpblitter, status_original.Length);
-                                Array.Copy(status_original, status_tmpblittersoftware, status_original.Length);
-
-                                byte[] tmp_blitterOnly = blitterCheck(ref status_tmpblitter, ref frame, opt_blitter_fill_horizgaps, opt_blitter_fill_vertgaps, bpp);
-                                for (int i = 0; i < status_tmpblitter.Length; i++) {
-                                    // remove all work done by blitter
-                                    if (status_tmpblitter[i] >= 10) status_tmpblittersoftware[i] = 0;
-                                }
-                                byte[] tmp_softwareAfterBlitter = softwareCheck(ref status_tmpblittersoftware, ref source, ref frame, opt_move_word, opt_register_long, opt_register_word, opt_addq);
-                                for (int i = 0; i < status_tmpblittersoftware.Length; i++) {
-                                    // merge blitter+software
-                                    if (status_tmpblittersoftware[i] > 0)
-                                        status_tmpblitter[i] = status_tmpblittersoftware[i];
-                                }
-
-                                currentsize = tmp_blitterOnly.Length + tmp_softwareAfterBlitter.Length;
-                                if (currentsize < maxsize) {
-                                    bitplanes = bpp;
-                                    maxsize = currentsize;
-                                    blitterOnly = tmp_blitterOnly;
-                                    softwareAfterBlitter = tmp_softwareAfterBlitter;
-                                    Array.Copy(status_tmpblitter, status_blitter, status_original.Length);
-                                    Array.Copy(status_tmpblittersoftware, status_blittersoftware, status_original.Length);
-                                }
-                            }
-                        }
-
-                        int gain = 0;
-                        if (softwareOnly.Length > 0) gain = 100 - (((blitterOnly.Length + softwareAfterBlitter.Length) * 100) / softwareOnly.Length);
-                        Console.WriteLine("software={0} blitter={1} blitter+software={2} blit_planes={4} gain={3}%", softwareOnly.Length, blitterOnly.Length, blitterOnly.Length + softwareAfterBlitter.Length, gain, bitplanes);
-
-
-                        if (opt_blitter && softwareOnly.Length > blitterOnly.Length + softwareAfterBlitter.Length) {
-                            Array.Copy(status_blitter, status, status.Length);
-                            final_length += blitterOnly.Length + softwareAfterBlitter.Length;
-                            usehardware = true;
-                        }
-                        else {
-                            Array.Copy(status_softwareonly, status, status.Length);
-                            final_length += softwareOnly.Length;
-                        }
-                        softwareonly_length += softwareOnly.Length;
-
-                        //if (write_file) fs.Write(cmd_rts, 0, cmd_rts.Length);
-                        //Console.WriteLine("cycles={0} cpu={4}% movel={1} movew={5} movel_reg={6} movew_reg={7} lea={2} addq={3}", cpu, stats["movel"], stats["lea"], stats["addq"], cpu / 2600, stats["movew"], stats["movel_reg"], stats["movew_reg"]);
-                        // csv.WriteLine("{0};{1};{2}", pic, cpu, fs.Length);
-                    }
                     int[] report = new int[status.Length];
 
                     Array.Copy(status, report, status.Length);
                     bw.ReportProgress(0, new Object[] { String.Format(original_image, pic), report });
 
                     using (var runfs = new FileStream(String.Format(runtimefile, final_pic), FileMode.Create, FileAccess.Write)) {
-                        if (unchanged) {
-                            tmpbuf[0] = 0;
-                            tmpbuf[1] = 0;
-                            runfs.Write(tmpbuf, 0, 2);
-                        }
-                        else if (usehardware) {
-                            tmpbuf[0] = (byte)((softwareAfterBlitter.Length >> 8) & 0xff);
-                            tmpbuf[1] = (byte)(softwareAfterBlitter.Length & 0xff);
-                            runfs.Write(tmpbuf, 0, 2);
-                            runfs.Write(softwareAfterBlitter, 0, softwareAfterBlitter.Length);
-                            runfs.Write(blitterOnly, 0, blitterOnly.Length);
-
-                        }
-                        else {
-                            tmpbuf[0] = (byte)((softwareOnly.Length >> 8) & 0xff);
-                            tmpbuf[1] = (byte)(softwareOnly.Length & 0xff);
-                            runfs.Write(tmpbuf, 0, 2);
-                            runfs.Write(softwareOnly, 0, softwareOnly.Length);
-                            tmpbuf[0] = 0xff;
-                            tmpbuf[1] = 0xff; // no blitter
-                            runfs.Write(tmpbuf, 0, 2);
-                        }
+                        tmpbuf[0] = 0;
+                        tmpbuf[1] = 0;
+                        runfs.Write(tmpbuf, 0, 2);
                     }
                 }
             }
@@ -654,356 +471,6 @@ namespace BASTGenerator
                 }
             }
 
-        }
-
-        byte[] cmd_rts = new byte[] { 0x4e, 0x75 };
-        byte[] cmd_movel = new byte[] { 0x2c, 0xfc, 0, 0, 0, 0 };
-        byte[] cmd_movew = new byte[] { 0x3c, 0xfc, 0, 0 };
-        byte[] cmd_lea_w = new byte[] { 0x4d, 0xee, 0, 0 };
-        byte[] cmd_addql = new byte[] { 0x50, 0x4e };
-        byte[] cmd_moveq = new byte[] { 0x70, 0 }; // register# << 1 in first byte
-        byte[] cmd_movew_reg = new byte[] { 0x3C, 0xC0 }; // register# in second byte
-        byte[] cmd_movel_reg = new byte[] { 0x2C, 0xC0 }; // register# in second byte
-        byte[] cmd_movel_toreg = new byte[] { 0x20, 0x3C, 0, 0, 0, 0 }; // register# << 1 in first byte
-
-        private byte[] softwareCheck(ref int[] status, ref byte[] source, ref int[] frame,
-            bool opt_move_word, bool opt_register_long, bool opt_register_word, bool opt_addq)
-        {
-            List<byte> result = new List<byte>();
-
-            int cpu = 0;
-            Dictionary<String, int> stats = new Dictionary<String, int>();
-            stats.Add("movel", 0);
-            stats.Add("movew", 0);
-            stats.Add("movel_reg", 0);
-            stats.Add("movew_reg", 0);
-            stats.Add("lea", 0);
-            stats.Add("addq", 0);
-            FileStream fs = null;
-           // if (write_file)
-            //    fs = new FileStream(String.Format(runtimefile, pic), FileMode.Create, FileAccess.Write);
-
-            // looking for the most repeated data for register optimisation
-            Dictionary<int, int> long_stat = new Dictionary<int, int>();
-            for (int i = 0; i < frame.Length - 1; i++) {
-                if (status[i] == 0 || status[i] >= 10 || status[i + 1] == 0) continue;
-                int value = (frame[i] << 16) + frame[i + 1];
-                if (!long_stat.ContainsKey(value)) long_stat.Add(value, 1);
-                else long_stat[value]++;
-            }
-            int register = 0;
-            Dictionary<int, int> long_reg = new Dictionary<int, int>();
-            foreach (KeyValuePair<int, int> kvp in long_stat.OrderByDescending(kvp => kvp.Value)) {
-                // Console.WriteLine("{0:X} => {1}", kvp.Key, kvp.Value);
-                long_reg.Add(kvp.Key, register);
-                register++;
-                if (register > 7) break;
-                if (kvp.Value < 3) break;
-            }
-            Dictionary<int, int> word_reg = new Dictionary<int, int>();
-            register = 0;
-            foreach (int key in long_reg.Keys) {
-                int value = key & 0xffff;
-                if (!word_reg.ContainsKey(value))
-                    word_reg.Add(value, register);
-                register++;
-            }
-
-            // register init
-            register = 0;
-            if (opt_register_long || opt_register_word) {
-                foreach (int value in long_reg.Keys) {
-                    if ((value & 0xffffff80) == 0 || (value & 0xffffff80) == 0xffffff80) {
-                        // moveq #xxx,dx
-                        cmd_moveq[0] = (byte)(0x70 | (register << 1));
-                        cmd_moveq[1] = (byte)(value & 0xff);
-                        //if (write_file) fs.Write(cmd_moveq, 0, cmd_moveq.Length);
-                        result.AddRange(cmd_moveq);
-                        cpu += 4;
-                    } else {
-                        // move.l #xxx,dx
-                        cmd_movel_toreg[0] = (byte)(0x20 | (register << 1));
-                        cmd_movel_toreg[2] = (byte)((value >> 24) & 0xff);
-                        cmd_movel_toreg[3] = (byte)((value >> 16) & 0xff);
-                        cmd_movel_toreg[4] = (byte)((value >> 8) & 0xff);
-                        cmd_movel_toreg[5] = (byte)(value & 0xff);
-                        //if (write_file) fs.Write(cmd_movel_toreg, 0, cmd_movel_toreg.Length);
-                        result.AddRange(cmd_movel_toreg);
-                        cpu += 12;
-                    }
-                    register++;
-                }
-            }
-
-            int pos = 0;
-            int gap = 0;
-            while (pos < 16000) {
-                if (status[pos] == 0) 
-                    { gap += 2; pos++; }
-                else {
-                    if (gap > 0) {
-                        if (opt_addq && gap < 8) {
-                            // addq is smaller
-                            cmd_addql[0] = (byte)(0x50 | (gap << 1));
-                            //if (write_file) fs.Write(cmd_addql, 0, cmd_addql.Length);
-                            result.AddRange(cmd_addql);
-                            stats["addq"]++;
-                        } else {
-                            // lea
-                            cmd_lea_w[2] = (byte)((gap >> 8) & 0xff);
-                            cmd_lea_w[3] = (byte)(gap & 0xff);
-                            //if (write_file) fs.Write(cmd_lea_w, 0, cmd_lea_w.Length);
-                            result.AddRange(cmd_lea_w);
-                            stats["lea"]++;
-                        }
-                        gap = 0;
-                        cpu += 8;
-                    }
-                    // TODO check if status==2 (register optimization)
-                    if (opt_move_word && (status[pos + 1] == 0 && status[pos + 2] == 0 || pos == 16000 - 1)) {
-                        // move.w
-                        if (opt_register_word && word_reg.ContainsKey(frame[pos])) {
-                            // move.w dx,(a6)+
-                            //Console.WriteLine("{0:X}", frame[pos]);
-                            status[pos] = 2;
-                            cmd_movew_reg[1] = (byte)(0xC0 | word_reg[frame[pos]]);
-                            //if (write_file) fs.Write(cmd_movew_reg, 0, cmd_movew_reg.Length);
-                            result.AddRange(cmd_movew_reg);
-                            cpu += 8;
-                        } else {
-                            // move.w #x,(a6)+
-                            for (int i = 0; i < 2; i++) cmd_movew[2 + i] = source[pos * 2 + i];
-                            //if (write_file) fs.Write(cmd_movew, 0, cmd_movew.Length);
-                            result.AddRange(cmd_movew);
-                            cpu += 12;
-                        }
-                        pos++;
-                        stats["movew"]++;
-                    } else {
-                        // move.l
-                        int value = (frame[pos] << 16) + frame[pos + 1];
-                        if (opt_register_long && long_reg.ContainsKey(value)) {
-                            // move.l dx,(a6)+
-                            status[pos] = 2;
-                            status[pos + 1] = 2;
-                            cmd_movel_reg[1] = (byte)(0xC0 | long_reg[value]);
-                            //if (write_file) fs.Write(cmd_movel_reg, 0, cmd_movel_reg.Length);
-                            result.AddRange(cmd_movel_reg);
-                            stats["movel_reg"]++;
-                            cpu += 12;
-                        } else {
-                            // move.l #x,(a6)+
-                            for (int i = 0; i < 4; i++) cmd_movel[2 + i] = source[pos * 2 + i];
-                            //if (write_file) fs.Write(cmd_movel, 0, cmd_movel.Length);
-                            result.AddRange(cmd_movel);
-                            stats["movel"]++;
-                            cpu += 20;
-
-                        }
-                        pos += 2;
-                    }
-                } 
-            }
-            result.AddRange(cmd_rts);
-            return result.ToArray();
-        }
-
-        private byte[] blitterCheck(ref int[] status, ref int[] frame, bool opt_blitter_fill_horizgaps, bool opt_blitter_fill_vertgaps, int opt_blitter_bitplanes)
-        {
-            // blitter timings:
-            // init $ffff8a00
-            // set to 0 or 1: 4 cycles/word (2x faster than generated code not counting lea/move.l)
-            // copy source: 8 cycles/word (same than software immediate, software register: 12 cycles)
-
-            // blitter data size:
-            // 1word = destination source add from previous operation end
-            // 1word = number of lines to copy (n bitplane, 16 pixels-wide = n words)
-            // 1word = HOP + OP
-            // => 8 bytes (= 1 row of 16 pixels in n bitplanes)
-            // followed by data
-            // set to 0 or 1: none (OP=0 or 15)
-            // source: size of source (OP=3)
-
-            int line_words = (highres ? 40 : 80);
-
-            int blitter_line_min_bitplanes = opt_blitter_bitplanes-1;
-            if (blitter_line_min_bitplanes == 0)
-                blitter_line_min_bitplanes = 1;
-            int blitter_min_lines = 8/opt_blitter_bitplanes;
-            if (opt_blitter_bitplanes == 1) opt_blitter_fill_horizgaps = false;
-
-            List<int> result = new List<int>();
-
-            result.Add(opt_blitter_bitplanes);
-
-            int i = 0, previous, current, next;
-            
-            if (opt_blitter_fill_horizgaps) {
-                // fill small gaps horizontally
-                while (i < status.Length) {
-                    current = status[i];
-                    previous = 0;
-                    next = 0;
-                    if (i > 0) previous = status[i - 1];
-                    if (i < status.Length - 1) next = status[i + 1];
-                    if ((previous == 1 || previous == 2) && current == 0 && (next == 1 || next == 2))
-                        status[i] = 3;
-                    
-                    i++;
-                }
-            }
-            if (opt_blitter_fill_vertgaps) {
-                // fill small gaps vertically
-                i = 0;
-                while (i < status.Length) {
-                    current = status[i];
-                    previous = 0;
-                    next = 0;
-                    if (i > line_words) previous = status[i - line_words];
-                    if (i < status.Length - line_words) next = status[i + line_words];
-                    if ((previous > 0) && current == 0 && (next > 0))
-                        status[i] = 3;
-                    else if (opt_blitter_bitplanes == 1) {
-                        // fill double gap if 1 bitplane
-                        next = 0;
-                        if (i < status.Length - line_words*2) next = status[i + line_words*2];
-                        if ((previous > 0) && current == 0 && (next > 0))
-                            status[i] = 3;
-                    }
-                    i++;
-                }
-            }
-
-            int old_offset = 0;
-            int offset = 0;
-            int blocks_number = -1;
-
-
-            int splitsize = (highres ? 400 : 200); // size of splitscreen (200 if not used)
-            int nb_splits = (highres ? 400 : 200) / splitsize;
-            int splitstart = 0;
-
-            int[] blitmodes = new int[] {
-                0x0100, // 0x0000 fill
-                0x010F,  // 0xFFFF fill
-                0x0203 // source
-            };
-
-            for (int spl=0; spl<nb_splits; spl++) {
-                splitstart = spl * splitsize;
-
-                foreach (int blitmode in blitmodes) {
-
-                    for (int x = 0; x < (line_words / opt_blitter_bitplanes); x++) {
-                        offset = x * opt_blitter_bitplanes;
-                        List<int> blocks = new List<int>();
-                        for (int y = splitstart; y < splitstart + splitsize; y++) {
-                            int pos = x * opt_blitter_bitplanes + y * line_words;
-                            int stat = 0;
-                            for (int b = 0; b < opt_blitter_bitplanes; b++) {
-                                switch (blitmode) {
-                                    case 0x0203:
-                                        // test differences only
-                                        if (status[pos + b] > 0 && status[pos + b] < 10) stat++;
-                                        break;
-                                    case 0x0100:
-                                        // must be 0x000
-                                        if (frame[pos + b] != 0x0000) {
-                                            b = opt_blitter_bitplanes;
-                                            stat = 0;
-                                        } else if (status[pos + b] > 0 && status[pos + b] < 10) stat++;
-                                        break;
-                                    case 0x010F:
-                                        // must be 0xFFFF
-                                        if (frame[pos + b] != 0xFFFF) {
-                                            b = opt_blitter_bitplanes;
-                                            stat = 0;
-                                        } else if (status[pos + b] > 0 && status[pos + b] < 10) stat++;
-                                        break;
-                                }
-                            }
-                            if (blocks.Count == 0) {
-
-                                // we're currently not in a block
-                                if (stat >= blitter_line_min_bitplanes) {
-                                    // blocl start
-                                    offset = pos;
-                                    blocks.Add(pos);
-                                }
-                                // else skip line
-
-                            } else if (blocks.Count < blitter_min_lines) {
-
-                                // we're in a potential block
-                                if (stat >= blitter_line_min_bitplanes) {
-                                    // big enough line, continue
-                                    blocks.Add(pos);
-                                } else {
-                                    // discard block
-                                    blocks = new List<int>();
-                                }
-                            } else {
-                                // we're in a big block
-                                if (stat >= blitter_line_min_bitplanes) {
-                                    // add line
-                                    blocks.Add(pos);
-                                } else {
-                                    // we're done, we close the block and record it
-                                    blocks_number++;
-                                    int tmp_offset = offset * 2;
-                                    result.Add(tmp_offset & 0xFFFF);
-                                    result.Add(blocks.Count);
-                                    result.Add(blitmode);
-                                    //Console.WriteLine("blitter block {0} lines={1}", blocks_number, blocks.Count);
-
-                                    foreach (int b in blocks) {
-                                        for (int c = 0; c < opt_blitter_bitplanes; c++) {
-                                            if (blitmode == 0x0203) {
-                                                result.Add(frame[b + c]);
-                                                status[b + c] += 10;
-                                            } else status[b + c] += 15;
-                                        }
-                                    }
-
-                                    // discard
-                                    blocks = new List<int>();
-                                }
-                            }
-                        }
-
-                        if (blocks.Count >= blitter_min_lines) {
-                            // we're done, we close the last block and record it
-                            blocks_number++;
-                            int tmp_offset = offset * 2;
-                            result.Add(tmp_offset & 0xFFFF);
-                            result.Add(blocks.Count);
-                            result.Add(blitmode); //  Console.WriteLine("blitter block {0} lines={1}", blocks_number, blocks.Count);
-
-                            foreach (int b in blocks) {
-                                for (int c = 0; c < opt_blitter_bitplanes; c++) {
-                                    if (blitmode == 0x0203) {
-                                        result.Add(frame[b + c]);
-                                        status[b + c] += 10;
-                                    }
-                                    else status[b + c] += 15;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            //Console.WriteLine("blitter blocks={0}", blocks_number);
-
-            byte[] bresult = new byte[result.Count * 2 + 2];
-            bresult[0] = (byte)((blocks_number >> 8) & 0xff);
-            bresult[1] = (byte)(blocks_number & 0xff);
-            for (i = 0; i < result.Count; i++) {
-                bresult[2 + i * 2] = (byte)((result[i] >> 8) & 0xff);
-                bresult[2 + i * 2 + 1] = (byte)(result[i] & 0xff);
-            }
-
-            return bresult;
         }
 
     }

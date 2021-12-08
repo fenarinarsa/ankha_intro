@@ -43,9 +43,9 @@ LStartM	EQU	$C
 LStartL	EQU	$D
 
 emu	EQU	0	; 1=emulate HDD access timings by adding NOPs
-ram_limit	EQU	0	; 0=no limit, other=malloc size
+ram_limit	EQU	256*1024	; 0=no limit, other=malloc size
 blitter	EQU	1	; 1=use blitter 0=emulate blitter (not complete, for debug purpose only)
-minimum_load EQU	512*400	; minimum size of a disk read (to optimize FREADs)
+minimum_load EQU	128*400	; minimum size of a disk read (to optimize FREADs)
 loop_play	EQU	1
 monochrome EQU 0
 
@@ -53,8 +53,8 @@ line_length EQU 	160
 horz_shift	 EQU	1
 intro_shift EQU	0
 vbl_per_frame EQU	2	; 25fps
-nb_frames	EQU	3828	; number of frames in file
-loop_frame EQU	992
+nb_frames	EQU	3821	; number of frames in file
+loop_frame EQU	100
 
 	MACRO	DMASNDST
 	move.l	\1,d0
@@ -245,10 +245,10 @@ hwinits
 	move.w	#$2700,sr
 
 	; STE pal
-	lea	palette,a0
-	jsr	convert_palette_ste
-	movem.l	palette,d0-d7
-	movem.l	d0-d7,$ffff8240.w
+;	lea	palette,a0
+;	jsr	convert_palette_ste
+;	movem.l	palette,d0-d7
+;	movem.l	d0-d7,$ffff8240.w
 
 	move.l	#vbl,$70.w
 	move.l	#hbl,$68.w
@@ -264,11 +264,12 @@ hwinits
 
 	move.w	#$2300,sr
 
-	move.b	screen_display_ptr+1,$ffff8201.w
-	move.b	screen_display_ptr+2,$ffff8203.w
-	move.b	screen_display_ptr+3,$ffff820d.w
+	; find the ST physical screen
+	move.b	$ffff8201.w,screen_debug_ptr+1
+	move.b	$ffff8203.w,screen_debug_ptr+2
+	move.b	$ffff820d.w,screen_debug_ptr+3
 
-	move.b     #%10,$FFFF8921.w	; 25kHz stereo
+	move.b     #%11,$FFFF8921.w	; 50kHz stereo
 	;move.b     #%10000001,$FFFF8921.w	; 12kHz mono
 	lea	buf_nothing,a0
 	DMASNDST	a0
@@ -390,16 +391,7 @@ first_refresh
 	blt.s	.wait
 	; clear screen
 	clr.w	b_first_refresh
-	move.l	screen_display_ptr,a0
-	moveq	#0,d0
-	move.w	#7999,d1
-.clr1	move.l	d0,(a0)+
-	dbra.s	d1,.clr1
-	move.l	screen_render_ptr,a0
-	move.w	#7999,d1
-.clr2	move.l	d0,(a0)+
-	dbra.s	d1,.clr2
-	;bra.s	.enableplay
+
 	rts
 
 
@@ -495,9 +487,9 @@ video_end
 	movem.l	d0-d7,$ffff8240.w
 	move.b	old_rez,$ffff8260.w
 	move.b	old_hz,$ffff820a.w
-	move.b	old_screen+1,$ffff8201.w
-	move.b	old_screen+2,$ffff8203.w
-	move.b	old_screen+3,$ffff820d.w
+	;move.b	old_screen+1,$ffff8201.w
+	;move.b	old_screen+2,$ffff8203.w
+	;move.b	old_screen+3,$ffff820d.w
 	move.w	#$2700,sr
 
 	lea	old_ints,a0
@@ -549,40 +541,16 @@ vbl	addq.w	#1,vbl_count
 	move.b	#199,$fffffa21.w
 	move.b	#8,$fffffa1b.w
 
-vbl_debug	;move.w	$ffff8240.w,-(sp)
+vbl_debug	move.w	$ffff8240.w,-(sp)
 	color_debug $555
 
 	movem.l	d0-a6,-(sp)
 
-	tst.w	b_first_refresh
-	beq.s	.nointro
-	move.l	screen_display_ptr,a1
-	add.w	#line_length*108+intro_shift,a1
-	bsr	loading_bar
 
-.nointro
-
-
-	tst.w	debug_info
-	bne.s	.print_debug
-
-	;end debug info
-
-.nodebug	
-	; check for palette change
-	move.l	pal_ptr,a0
-	move.w	(a0),d0
-	addq	#2,d0
-	cmp.w	rendered_frame,d0
-	bne.s	.nopalchange
-	lea	34(a0),a0		; next palette
-	move.l	a0,pal_ptr
-.nopalchange
-	movem.l	-32(a0),d0-d7	; setup palette for this frame
-	movem.l	d0-d7,$ffff8240.w
+	bsr	.print_debug
 
 	movem.l	(sp)+,d0-a6
-	;move.w	(sp)+,$ffff8240.w
+	move.w	(sp)+,$ffff8240.w
 	rte
 
 .print_debug
@@ -635,31 +603,70 @@ vbl_debug	;move.w	$ffff8240.w,-(sp)
 	moveq	#3,d6
 	bsr	textprint
 
-	; next palette frame
-	lea	s_hex,a6
-	move.l	pal_ptr,a0
-	move.w	(a0),d0
-	move.l	a6,a0
-	bsr	itoahex
-	move.l	a6,a0
-	addq.l	#4,a0
-	moveq	#3,d6
-	bsr	textprint
-
-	bra	.nodebug
+	rts
 	
 
 * Timer A
 * used only for debugging to check when the audio DMA buffer loops
 timer_a	move.b	#1,$fffffa1f.w
-	tst.w	debug_color
-	bne.s	.debug_ta
-	rte
+	color_debug $700
 
-.debug_ta	color_debug $700
-	REPT 128
-	nop
-	ENDR
+	movem.l	d0-a6,-(sp)
+
+	tst.w	b_buffering_lock
+	bne	endrender
+
+	move.l	idx_play,a1	; current frame
+	move.l	(a1),d0
+	ble	enter_buffering	; null ptr = not loaded yet
+
+	; set the new DMA audio buffer
+	; will be used when DMA loops automatically
+	; note that it would be ideally in 1 (mono) or 2 (color) vbls and then be in sync with the video
+	; there is many ways to achieve that but in this version it relies on the first audio frame
+	; to be smaller so the DMA loop happens just before this 'render' function is called
+	move.l	d0,a1
+	move.l	a1,play_ptr
+	add.w	#1,play_frm
+	move.l	d0,a0
+	move.l	(a0)+,d0		; pcm length
+	move.l	a0,a1
+	add.l	d0,a1		; pcm end
+	DMASNDED	a1
+	DMASNDST	a0
+
+	;temporary hack to avoid emulation audio cracks
+	moveq	#0,d0
+	lea	$ffff8907.w,a0
+	movep.l	(a0),d0
+	and.l	#$00ffffff,d0
+	move.l	d0,aplay_ptr
+	add.w	#1,aplay_frm
+
+	; empty graphics, skip render
+	addq	#2,a1  ; 0 = audio only
+
+	IFNE	loop_play	
+	; clear the idx playlist in case the video loops and inc idx_play+4
+	move.l	idx_play,a0
+	move.l	a0,a1
+	addq	#4,a0
+	cmp.l	#-1,(a0)
+	bne	.noloop1
+	move.l	#play_index,a0
+.noloop1	move.l	a0,idx_play
+	clr.l	(a1)
+	ELSE
+	add.l	#4,idx_play
+	ENDC
+	bra.s	endrender
+
+enter_buffering
+	move.b	#%00,$ffff8901.w	; stop sound
+	move.w	#-1,b_buffering_lock
+
+endrender	
+	movem.l	(sp)+,d0-a6
 	color_debug $000
 dummy_rte	rte
 
@@ -695,216 +702,23 @@ hbl	move.w	$ffff8240.w,-(sp)
 	movem.l	d0-a6,-(sp)
 
 	tst.w	b_buffering_lock
-	bne	norender
-
-	move.w	vbl_count,d0
-	cmp.w	next_refresh,d0
-	blt	norender
-	addq.w	#vbl_per_frame,d0
-	move.w	d0,next_refresh
-
-render	move.l	idx_play,a1	; current frame
-	move.l	(a1),d0
-	ble	enter_buffering	; null ptr = not loaded yet
+	bne	nohblrender
 
 	add.w	#1,rendered_frame 	; for debug purpose only
-
-	; set the new DMA audio buffer
-	; will be used when DMA loops automatically
-	; note that it would be ideally in 1 (mono) or 2 (color) vbls and then be in sync with the video
-	; there is many ways to achieve that but in this version it relies on the first audio frame
-	; to be smaller so the DMA loop happens just before this 'render' function is called
-	move.l	d0,a1
-	move.l	a1,play_ptr
-	add.w	#1,play_frm
-	move.l	d0,a0
-	move.l	(a0)+,d0		; pcm length
-	move.l	a0,a1
-	add.l	d0,a1		; pcm end
-	DMASNDED	a1
-	DMASNDST	a0
-
-	;temporary hack to avoid emulation audio cracks
-	moveq	#0,d0
-	lea	$ffff8907.w,a0
-	movep.l	(a0),d0
-	and.l	#$00ffffff,d0
-	move.l	d0,aplay_ptr
-	add.w	#1,aplay_frm
 
 	; check if unchanged frame
 	; apply to frame N-2 so we need to save this
 	tst.w	swap_buffers
-	beq	.noswap
+	beq	nohblrender
 
 	; swap video buffers
 	; so next vbl we're gonna see the frame rendered 2 vbls ago
 	move.l	screen_render_ptr,a0
 	move.l	screen_display_ptr,screen_render_ptr
 	move.l	a0,screen_display_ptr
-	sub.w	#line_length*8,a0
-	move.l	a0,screen_debug_ptr
 
+nohblrender
 	bsr	set_screen
-
-	; empty graphics, skip render
-.noswap	move.w	(a1),swap_buffers
-	beq	.noblitter
-	
-	; software part (generated code in file)
-	move.l	screen_render_ptr,a6
-	jsr	2(a1)
-
-	; purple
-	color_debug $303
-
-	move.w	(a1)+,d0
-	add.w	d0,a1	; size of software render code
-
-
-	move.w	(a1)+,d0	; nb of blitter blocks
-	blt	.noblitter
-
-	;move.w	#$707,$ffff8240.w
-	
-	IFNE	blitter
-	move.w	#2,$ffff8a20.w	; src x byte increment
-	move.w	#2,$ffff8a22.w	; src y byte increment
-	move.w	#-1,$ffff8a28.w	; endmask1
-	move.w	#-1,$ffff8a2a.w	; endmask2
-	move.w	#-1,$ffff8a2c.w	; endmask3
-	move.w	#2,$ffff8a2e.w	; dest x byte increment
-	ENDC
-	move.w	(a1)+,d3		; blocks # bitplanes (1/2/4)
-	move.w	d3,d4
-	IFNE	blitter
-	add.w	d3,d3
-	subq.w	#2,d3
-	move.w	#line_length,d2
-	sub.w	d3,d2
-	move.w	d2,$ffff8a30.w	; dest y byte increment
-	clr.b	$ffff8a3d.w	; clear skew register
-	ENDC
-
-
-.nextblit	move.l	screen_render_ptr,a6
-	add.w	(a1)+,a6		; offset from start of screen
-	move.w	(a1)+,d1
-	bmi	video_end		; (assert) y count negative => bug!
-
-	IFNE	blitter
-	move.w	d1,$ffff8a38.w	; y count
-	move.w	d4,$ffff8a36.w	; x word count
-	move.w	#2,$ffff8a20.w	; src x byte increment
-	move.w	#2,$ffff8a22.w	; src y byte increment
-	move.w	(a1)+,d1
-	move.w	d1,$ffff8a3a.w	; HOP+OP
-	cmp.w	#$0203,d1		; copy mode ?
-	beq.s	.copymode
-	clr.w	$ffff8a20.w	; *no* src x byte increment
-	clr.w	$ffff8a22.w	; *no* src y byte increment
-.copymode	move.l	a1,$ffff8a24.w	; source
-	move.l	a6,$ffff8a32.w	; destination
-	move.b	#%11000000,$ffff8a3c.w	; start HOG
-	nop			; wait a few cycles for the blitter to start (STE/MSTE)
-	nop
-	move.l	$ffff8a24.w,a1
-
-	ELSE
-	move.w	(a1)+,d3	; HOP+OP $0203 copy / $0100 0's fill / $010F 1's fill
-	* WARNING crude software emulation / very slow unless there is a CPU cache
-	* only for debug purpose or TT compatibility
-	cmp.w	#$0203,d3
-	beq	.softcopy
-	moveq	#0,d5
-	cmp.w	#$0100,d3
-	beq.s	.softfill
-	moveq	#-1,d5
-
-.softfill	cmp.w	#4,d4
-	blt.s	.softf2bpp
-	move.w	d1,d2
-	subq.w	#1,d2
-.softfill4	move.l	d5,(a6)+
-	move.l	d5,(a6)
-	lea	line_length-4(a6),a6
-	dbra.s	d2,.softfill4
-	bra.s	.endsoftcopy
-
-.softf2bpp	cmp.w	#2,d4
-	blt.s	.softf1bpp
-	move.w	d1,d2
-	subq.w	#1,d2
-.softfill2	move.l	d5,(a6)
-	lea	line_length(a6),a6
-	dbra.s	d2,.softfill2
-	bra.s	.endsoftcopy
-
-.softf1bpp	move.w	d1,d2
-	subq.w	#1,d2
-.softfill1	move.w	d5,(a6)
-	lea	line_length(a6),a6
-	dbra.s	d2,.softfill1
-	bra.s	.endsoftcopy
-
-.softcopy	cmp.w	#4,d4
-	blt.s	.soft2bpp
-	move.w	d1,d2
-	subq.w	#1,d2
-.softcopy4	move.l	(a1)+,(a6)+
-	move.l	(a1)+,(a6)
-	lea	line_length-4(a6),a6
-	dbra.s	d2,.softcopy4
-	bra.s	.endsoftcopy
-
-.soft2bpp	cmp.w	#2,d4
-	blt.s	.soft1bpp
-	move.w	d1,d2
-	subq.w	#1,d2
-.softcopy2	move.l	(a1)+,(a6)
-	lea	line_length(a6),a6
-	dbra.s	d2,.softcopy2
-	bra.s	.endsoftcopy
-
-.soft1bpp	move.w	d1,d2
-	subq.w	#1,d2
-.softcopy1	move.w	(a1)+,(a6)
-	lea	line_length(a6),a6
-	dbra.s	d2,.softcopy1
-
-.endsoftcopy
-	ENDC
-
-	IFNE	monochrome
-	tst.w	debug_color
-	beq.s	.nodebug
-	not.w	$ffff8240.w
-.nodebug
-	ENDC
-
-	dbra.s	d0,.nextblit
-
-.noblitter
-	IFNE	loop_play	
-	; clear the idx playlist in case the video loops and inc idx_play+4
-	move.l	idx_play,a0
-	move.l	a0,a1
-	addq	#4,a0
-	cmp.l	#-1,(a0)
-	bne	.noloop1
-	move.l	#play_index,a0
-.noloop1	move.l	a0,idx_play
-	clr.l	(a1)
-	ELSE
-	add.l	#4,idx_play
-	ENDC
-	bra.s	endrender
-
-enter_buffering
-	move.b	#%00,$ffff8901.w	; stop sound
-	move.w	#-1,b_buffering_lock
-
-endrender	
 	movem.l	(sp)+,d0-a6
 	
 	clr.w	b_lock_render
@@ -913,18 +727,16 @@ endhbl	move.w	(sp)+,$ffff8240.w
 	or.w	#$0300,(sp)	; disable HBL after rte (should not work on 68030+)
 	rte
 
-norender	bsr	set_screen
-	bra.s	endrender
-
-set_screen	tst.w	debug_info
-	beq.s	.noshift
-	move.b	screen_debug_ptr+1,$ffff8201.w
-	move.b	screen_debug_ptr+2,$ffff8203.w
-	move.b	screen_debug_ptr+3,$ffff820d.w
-	bra.s	.end
-.noshift	move.b	screen_display_ptr+1,$ffff8201.w
-	move.b	screen_display_ptr+2,$ffff8203.w
-	move.b	screen_display_ptr+3,$ffff820d.w
+set_screen
+	tst.w	debug_info
+	;beq.s	.noshift
+	;move.b	screen_debug_ptr+1,$ffff8201.w
+	;move.b	screen_debug_ptr+2,$ffff8203.w
+	;move.b	screen_debug_ptr+3,$ffff820d.w
+	;bra.s	.end
+.noshift	;move.b	screen_display_ptr+1,$ffff8201.w
+	;move.b	screen_display_ptr+2,$ffff8203.w
+	;move.b	screen_display_ptr+3,$ffff820d.w
 .end	rts
 
 *** MISC
@@ -944,6 +756,9 @@ flush	move.w	d0,-(sp)
 .s1	move.w	(sp)+,d0
 	rts
 
+file_error
+	pea	s_errfile
+	bra.s	error_message
 buyram	pea	s_errmemory
 error_message
 	move.w	#9,-(sp)
@@ -956,36 +771,6 @@ error_message
 
 	jmp	end
 
-*** LOADING BAR
-	; a1 destination address on screen
-
-loading_bar
-	moveq	#-1,d6
-	cmp.w	#-2,b_first_refresh
-	beq.s	.display	; loading done
-
-	move.l	vid_buffer,a2
-	move.l	vid_buffer_end,d1
-	sub.l	#minimum_load,d1  ; this is not a perfect progress bar because we don't know exactly the loading size
-	sub.l	a2,d1	; buffer size	
-	divu	#80,d1	; 40 chars *2 to avoid divu overflow when buffer size > 2.6MB
-	and.l	#$ffff,d1
-	lsl.l	#1,d1	; cancel the *2 effect
-
-	moveq	#-1,d6
-	move.w	#39,d2	; print max 40 chars (41st one is discarded)
-.test	addq	#1,d6
-	cmp.l	load_ptr,a2
-	bge.s	.display
-	add.l	d1,a2
-	dbra.s	d2,.test
-.display	lea	pgbar_text(pc),a0
-	bsr.s	textprint
-	rts
-
-pgbar_text	
-	dc.b	'########### ZONE-ARCHIVE.COM ###########',0
-	even
 
 *** STRING FUNCTIONS
 
@@ -1018,7 +803,6 @@ textprint	lea	smallfont(pc),a2
 	lea	(a2,d2.w),a3	; source
 
 .print
-	;REPT	4
 	move.b	(a3)+,(a1)
 	move.b	(a3)+,line_length(a1)
 	move.b	(a3)+,line_length*2(a1)
@@ -1028,9 +812,6 @@ textprint	lea	smallfont(pc),a2
 	move.b	(a3)+,line_length*6(a1)
 	move.b	(a3),line_length*7(a1)
 	addq	#8,a1
-	;subq	#7,a3
-	;ENDR
-	;dbra.s	d1,.print	
 
 	IFEQ	monochrome
 	move.l	a1,d5
@@ -1078,11 +859,11 @@ b_first_refresh
 b_fileerror
 	dc.w	0
 screen_render_ptr
-	dc.l	SCREEN
+	dc.l	bufscreen
 screen_display_ptr 
-	dc.l	SCREEN+(320*240)
+	dc.l	bufscreen+(320*240)
 screen_debug_ptr
-	dc.l	bufscreen2
+	dc.l	bufscreen
 file_handle
 	dc.w	0
 debug_color
@@ -1117,9 +898,9 @@ swap_buffers
 
 
 s_vid_filename
-	dc.b	"ANKHA.DAT",0
+	dc.b	"AUDIO.DAT",0
 s_idx_filename
-	dc.b	"ANKHA.IDX",0
+	dc.b	"AUDIO.IDX",0
 s_debug_load
 	dc.b	"LOAD ",0
 s_debug_play
@@ -1164,5 +945,6 @@ old_hz	ds.b	1
 vid_index	ds.w	nb_frames+1
 play_index	ds.l	nb_frames+1
 buf_nothing
-	ds.w	40;
+	ds.w	40
 buf_nothing_end
+bufscreen	ds.w	32000
