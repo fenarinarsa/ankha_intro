@@ -333,9 +333,11 @@ ftloop	add.w	#$F0F0,(a0)+
 	move.w	#$0203,$ffff8a3a.w    ; HOP+OP: $010F=1fill/$0203=copy
 	move.l	fontidx+4,$ffff8a24.w   ; src
 	move.l	screen_display_ptr,$ffff8a32.w   ; dest
-	move.b	#%11000000,$ffff8a3c.w ; start HOG
+	;move.b	#%11000000,$ffff8a3c.w ; start HOG
 	nop
 	nop
+	
+	;jsr	scrolltext
 
 	move.w	#$2300,sr
 
@@ -648,14 +650,14 @@ vbl_debug	move.w	$ffff8240.w,-(sp)
 	bsr	textprint
 
 	; last rendered frame
-	lea	s_hex,a6
-	move.l	a6,a0
-	move.w	rendered_frame,d0
-	bsr	itoahex
-	move.l	a6,a0
-	addq.l	#4,a0
-	moveq	#3,d6
-	bsr	textprint
+	;lea	s_hex,a6
+	;move.l	a6,a0
+	;move.w	rendered_frame,d0
+	;bsr	itoahex
+	;move.l	a6,a0
+	;addq.l	#4,a0
+	;moveq	#3,d6
+	;bsr	textprint
 
 	rts
 	
@@ -758,7 +760,9 @@ hbl	move.w	$ffff8240.w,-(sp)
 	tst.w	b_buffering_lock
 	bne	nohblrender
 
-	add.w	#1,rendered_frame 	; for debug purpose only
+	jsr	scrolltext
+
+	;add.w	#1,rendered_frame 	; for debug purpose only
 
 	; check if unchanged frame
 	; apply to frame N-2 so we need to save this
@@ -767,9 +771,9 @@ hbl	move.w	$ffff8240.w,-(sp)
 
 	; swap video buffers
 	; so next vbl we're gonna see the frame rendered 2 vbls ago
-	move.l	screen_render_ptr,a0
-	move.l	screen_display_ptr,screen_render_ptr
-	move.l	a0,screen_display_ptr
+	;move.l	screen_render_ptr,a0
+	;move.l	screen_display_ptr,screen_render_ptr
+	;move.l	a0,screen_display_ptr
 
 nohblrender
 	bsr	set_screen
@@ -828,6 +832,148 @@ set_videoaddr
 	move.b	#LStartH,CRTC_I
 	move.b	screen_display_ptr+1,CRTC_D
 	rts
+	
+*** SCROLLTEXT
+; 100% blitter
+; each char is copied individually on screen
+; complex because the chars are 26px wide ToT
+
+scrolltext
+	;move.w	#22,textshift
+	
+	move.l	screen_render_ptr,a6
+	add.l	#(240-25)*640,a6	; screen bottom
+	move.l	textptr,a5
+	lea	fontidx,a4
+	moveq	#11,d7
+	move.w	textshift,d6
+	beq.s	.middle
+	cmp.w	#18,d6
+	bge.s	.firstchar
+	moveq	#10,d7
+
+.firstchar	
+	; first char
+	moveq	#0,d0
+	move.b	(a5)+,d0
+	sub.w	#' ',d0
+	lsl.w	#2,d0
+	move.l	(a4,d0.w),a0	; char ptr	
+	add.w	d6,a0	; add text shift
+
+	moveq	#26,d1
+	sub.w	d6,d1
+	move.w	d1,d4
+	move.w	#2+1536,d2
+	sub.w	d1,d2	; src y byte increment
+	move.w	#2+640,d3
+	sub.w	d1,d3	; dst y increment
+	lsr.w	#1,d1	; x word count
+
+	; copy 1 char to video RAM with the blitter
+	move.w	#25,$ffff8a38.w ; y count
+	move.w	d1,$ffff8a36.w  ; x word count
+	move.w	#2,$ffff8a20.w   ; src x byte increment
+	move.w	d2,$ffff8a22.w   ; src y byte increment
+	move.w	#2,$ffff8a2e.w ; dst x increment
+	move.w     d3,$ffff8a30.w ; dst y increment
+	clr.b	$ffff8a3d.w    ; skew
+	move.w	#-1,$ffff8a28.w ; endmask1
+	move.w	#-1,$ffff8a2a.w ; endmask2
+	move.w	#-1,$ffff8a2c.w ; endmask3
+	move.w	#$0203,$ffff8a3a.w    ; HOP+OP: $010F=1fill/$0203=copy
+	move.l	a0,$ffff8a24.w   ; src
+	move.l	a6,$ffff8a32.w   ; dest
+	move.b	#%11000000,$ffff8a3c.w ; start HOG
+	nop
+	nop
+	
+	add.w	d4,a6	; next char on screen
+	
+	; 11 or 12  middle chars
+.middle	
+.loopchar	moveq	#0,d0
+	move.b	(a5)+,d0
+	sub.w	#' ',d0
+	lsl.w	#2,d0
+	move.l	(a4,d0.w),a0	; char ptr
+
+	; copy 1 char to video RAM with the blitter
+	move.w	#25,$ffff8a38.w ; y count
+	move.w	#13,$ffff8a36.w  ; x word count
+	move.w	#2,$ffff8a20.w   ; src x byte increment
+	move.w	#2+1534-24,$ffff8a22.w   ; src y byte increment
+	move.w	#2,$ffff8a2e.w ; dst x increment
+	move.w     #2+640-26,$ffff8a30.w ; dst y increment
+	clr.b	$ffff8a3d.w    ; skew
+	move.w	#-1,$ffff8a28.w ; endmask1
+	move.w	#-1,$ffff8a2a.w ; endmask2
+	move.w	#-1,$ffff8a2c.w ; endmask3
+	move.w	#$0203,$ffff8a3a.w    ; HOP+OP: $010F=1fill/$0203=copy
+	move.l	a0,$ffff8a24.w   ; src
+	move.l	a6,$ffff8a32.w   ; dest
+	move.b	#%11000000,$ffff8a3c.w ; start HOG
+	nop
+	nop
+	
+	add.w	#26,a6
+	dbra	d7,.loopchar
+	
+	cmp.w	#18,d6
+	beq.s	.shifttext
+	
+	; last char (if needed)
+	moveq	#0,d0
+	move.b	(a5)+,d0
+	sub.w	#' ',d0
+	lsl.w	#2,d0
+	move.l	(a4,d0.w),a0	; char ptr	
+	;add.w	d6,a0	; add text shift
+
+	moveq	#8,d1
+	add.w	d6,d1
+	cmp.w	#26,d1
+	blt.s	.noovflow
+	sub.w	#26,d1
+.noovflow	move.w	#2+1536,d2
+	sub.w	d1,d2	; src y byte increment
+	move.w	#2+640,d3
+	sub.w	d1,d3	; dst y increment
+	lsr.w	#1,d1	; x word count
+
+	; copy 1 char to video RAM with the blitter
+	move.w	#25,$ffff8a38.w ; y count
+	move.w	d1,$ffff8a36.w  ; x word count
+	move.w	#2,$ffff8a20.w   ; src x byte increment
+	move.w	d2,$ffff8a22.w   ; src y byte increment
+	move.w	#2,$ffff8a2e.w ; dst x increment
+	move.w     d3,$ffff8a30.w ; dst y increment
+	clr.b	$ffff8a3d.w    ; skew
+	move.w	#-1,$ffff8a28.w ; endmask1
+	move.w	#-1,$ffff8a2a.w ; endmask2
+	move.w	#-1,$ffff8a2c.w ; endmask3
+	move.w	#$0203,$ffff8a3a.w    ; HOP+OP: $010F=1fill/$0203=copy
+	move.l	a0,$ffff8a24.w   ; src
+	move.l	a6,$ffff8a32.w   ; dest
+	move.b	#%11000000,$ffff8a3c.w ; start HOG
+	nop
+	nop
+
+.shifttext	
+	tst.b	(a5)
+	beq.s	.wrap
+	addq	#6,d6	; scroll speed (must be even and <=26)
+	cmp.w	#26,d6
+	blt.s	.noinc
+	sub.w	#26,d6
+	add.l	#1,textptr
+	bra.s	.noinc
+.wrap	move.l	#text,textptr
+	moveq	#0,d6
+.noinc	move.w	d6,textshift			
+	rts
+	
+
 
 *** MISC
 
@@ -1002,6 +1148,14 @@ s_errmemory
 	dc.b	"Not enough memory available T_T",10,13,10,13,"Please buy some RAM and try again.",10,13,0
 s_errfile
 	dc.b	"File error",10,13,0
+
+text	dc.b	"             "
+	dc.b	"LALALALA DOES IT WORK AND THIS FONT DOES NOT HAVE ANY KIND OF QUESTION MARK I'M SO DISAPPOINTED"
+	dc.b	"             "
+	dc.b	0
+	even
+textptr	dc.l	text
+textshift	dc.w	0
 
 	even
 
