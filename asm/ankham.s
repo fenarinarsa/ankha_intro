@@ -785,10 +785,19 @@ set_videoaddr
 *** SCROLLTEXT
 ; 100% blitter
 ; each char is copied individually on screen
-; complex because the chars are 26px wide ToT
+; a bit complex because the chars are 26px wide ToT
 
 scrolltext
 	;move.w	#22,textshift
+
+	; setup static blitter registers
+	move.w	#2,$ffff8a20.w   ; src x byte increment
+	move.w	#2,$ffff8a2e.w ; dst x increment
+	clr.b	$ffff8a3d.w    ; skew
+	move.w	#-1,$ffff8a28.w ; endmask1
+	move.w	#-1,$ffff8a2a.w ; endmask2
+	move.w	#-1,$ffff8a2c.w ; endmask3
+	move.w	#$0203,$ffff8a3a.w    ; HOP+OP: $010F=1fill/$0203=copy
 	
 	move.l	screen_render_ptr,a6
 	add.l	#(240-25)*640,a6	; screen bottom
@@ -822,15 +831,8 @@ scrolltext
 	; copy 1 char to video RAM with the blitter
 	move.w	#25,$ffff8a38.w ; y count
 	move.w	d1,$ffff8a36.w  ; x word count
-	move.w	#2,$ffff8a20.w   ; src x byte increment
 	move.w	d2,$ffff8a22.w   ; src y byte increment
-	move.w	#2,$ffff8a2e.w ; dst x increment
-	move.w     d3,$ffff8a30.w ; dst y increment
-	clr.b	$ffff8a3d.w    ; skew
-	move.w	#-1,$ffff8a28.w ; endmask1
-	move.w	#-1,$ffff8a2a.w ; endmask2
-	move.w	#-1,$ffff8a2c.w ; endmask3
-	move.w	#$0203,$ffff8a3a.w    ; HOP+OP: $010F=1fill/$0203=copy
+	move.w	d3,$ffff8a30.w ; dst y increment
 	move.l	a0,$ffff8a24.w   ; src
 	move.l	a6,$ffff8a32.w   ; dest
 	move.b	#%11000000,$ffff8a3c.w ; start HOG
@@ -850,15 +852,8 @@ scrolltext
 	; copy 1 char to video RAM with the blitter
 	move.w	#25,$ffff8a38.w ; y count
 	move.w	#13,$ffff8a36.w  ; x word count
-	move.w	#2,$ffff8a20.w   ; src x byte increment
 	move.w	#2+1534-24,$ffff8a22.w   ; src y byte increment
-	move.w	#2,$ffff8a2e.w ; dst x increment
-	move.w     #2+640-26,$ffff8a30.w ; dst y increment
-	clr.b	$ffff8a3d.w    ; skew
-	move.w	#-1,$ffff8a28.w ; endmask1
-	move.w	#-1,$ffff8a2a.w ; endmask2
-	move.w	#-1,$ffff8a2c.w ; endmask3
-	move.w	#$0203,$ffff8a3a.w    ; HOP+OP: $010F=1fill/$0203=copy
+	move.w	#2+640-26,$ffff8a30.w ; dst y increment
 	move.l	a0,$ffff8a24.w   ; src
 	move.l	a6,$ffff8a32.w   ; dest
 	move.b	#%11000000,$ffff8a3c.w ; start HOG
@@ -877,7 +872,6 @@ scrolltext
 	sub.w	#' ',d0
 	lsl.w	#2,d0
 	move.l	(a4,d0.w),a0	; char ptr	
-	;add.w	d6,a0	; add text shift
 
 	moveq	#8,d1
 	add.w	d6,d1
@@ -893,15 +887,8 @@ scrolltext
 	; copy 1 char to video RAM with the blitter
 	move.w	#25,$ffff8a38.w ; y count
 	move.w	d1,$ffff8a36.w  ; x word count
-	move.w	#2,$ffff8a20.w   ; src x byte increment
 	move.w	d2,$ffff8a22.w   ; src y byte increment
-	move.w	#2,$ffff8a2e.w ; dst x increment
-	move.w     d3,$ffff8a30.w ; dst y increment
-	clr.b	$ffff8a3d.w    ; skew
-	move.w	#-1,$ffff8a28.w ; endmask1
-	move.w	#-1,$ffff8a2a.w ; endmask2
-	move.w	#-1,$ffff8a2c.w ; endmask3
-	move.w	#$0203,$ffff8a3a.w    ; HOP+OP: $010F=1fill/$0203=copy
+	move.w	d3,$ffff8a30.w ; dst y increment
 	move.l	a0,$ffff8a24.w   ; src
 	move.l	a6,$ffff8a32.w   ; dest
 	move.b	#%11000000,$ffff8a3c.w ; start HOG
