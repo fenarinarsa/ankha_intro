@@ -120,10 +120,10 @@ namespace BASTGenerator
         // uncomment for monochrome
         //double fps = 30;
         //double target_fps = monochrome_fps; // should be >= fps
-        bool audio_only = true; // true if no video
-        bool audio_mux_only = false; // set to true if you only changed audio
+        //bool audio_only = true; // true if no video
+        //bool audio_mux_only = false; // set to true if you only changed audio
         int first_pic = 0;
-        int last_pic = 3819;
+        int last_pic = 4662;
         // set to true if you generate a monochrome highres animation. target bitplanes will be forced to 1
         bool highres = false;
 
@@ -134,15 +134,15 @@ namespace BASTGenerator
         // audio
         int original_samplesize = 2;   // original should always be 16 bits PCM
         int ste_channels = 2;          // 1=mono, 2=stereo (also applies to the input wav file)
-        int soundfrq = 50066;       // audio frequency (+/-1Hz depending on the STE main clock). divide by 2 for 25kHz, 4 for 12kHz, etc.
-        String soundfile = @"D:\ankha\ankham.wav"; // Original sound file (PCM 16 bit little endian without any tag)
+        int soundfrq = 25033;       // audio frequency (+/-1Hz depending on the STE main clock). divide by 2 for 25kHz, 4 for 12kHz, etc.
+        String soundfile = @"D:\ankha\scratch_25k_16b.wav"; // Original sound file (PCM 16 bit little endian without any tag)
 
         // Temp files created in step 1
-        String degas_source = @"D:\ankha\ankha{0}bc\ak_";
+        //String degas_source = @"D:\ankha\ankha{0}bc\ak_";
 
         // Temp files created in step 2
-        String runtimefile = @"D:\ankha\ankham_run\ankha_{0:00000}.run";
-        String runtimesoundfile = @"D:\ankha\ankham_runankha_{0:00000}.pcm";
+        //String runtimefile = @"D:\ankha\ankham_run\ankha_{0:00000}.run";
+        String runtimesoundfile = @"D:\ankha\ankham_run\ankha_{0:00000}.pcm";
 
         // Final files 
         String finalvid = @"S:\Emulateurs\Atari ST\HDD_C\DEV\NEW\ankham\asm\audio.dat";
@@ -153,156 +153,10 @@ namespace BASTGenerator
         public MainWindow()
         {
             InitializeComponent();
-            if (highres) target_nb_bitplanes = 1;
-            degas_source = String.Format(degas_source, (highres?0:target_nb_bitplanes));
+            //if (highres) target_nb_bitplanes = 1;
+            //degas_source = String.Format(degas_source, (highres?0:target_nb_bitplanes));
         }
 
-        private void converttoPI1_Click(object sender, RoutedEventArgs e)
-        {
-            btn_pi1.IsEnabled = false;
-            btn_runtime.IsEnabled = false;
-            bw = new BackgroundWorker();
-            bw.WorkerSupportsCancellation = true;
-            bw.WorkerReportsProgress = true;
-            bw.ProgressChanged += bw_ProgressChanged2;
-            bw.RunWorkerCompleted += bw_RunWorkerCompleted;
-            bw.DoWork += bw_MakeDegas;
-            bw.RunWorkerAsync();
-
-        }
-
-        // Color version
-        private void bw_MakeDegas(object sender, DoWorkEventArgs e)
-        {
-
-            for (int pic = first_pic; pic <= last_pic; pic++) {
-                String picfile = String.Format(original_image, pic);
-                Console.WriteLine(pic);
-                Bitmap myBitmap = new Bitmap(picfile);
-                byte[] header = new byte[34];
-                byte[] originalpic = File.ReadAllBytes(picfile); // 320xY 256c BMP only!! Y<=200
-                int bmp_palettestart = 0x36;
-            
-                int palette = (int)Math.Pow(2, target_nb_bitplanes);
-                //for (int i = 3; i < 34; i++) header[i] = 0x0f;
-                for (int i = 0; i < palette; i++) {
-                    int b = originalpic[bmp_palettestart + i * 4];
-                    int g = originalpic[bmp_palettestart + i * 4 + 1];
-                    int r = originalpic[bmp_palettestart + i * 4 + 2];
-                    // STE conversion
-                    r = ((r & 0x10) >> 1) | ((r & 0xE0) >> 5);
-                    g = ((g & 0x10) << 3) | ((g & 0xE0) >> 1);
-                    b = ((b & 0x10) >> 1) | ((b & 0xE0) >> 5);
-
-                    ; int shade = (i * 15) / (palette - 1);
-                    ; byte ste_shade = (byte)(((shade & 0x1) << 3) | ((shade & 0xe) >> 1));
-                    header[2 + i * 2] = (byte)r;
-                    header[2 + i * 2 + 1] = (byte)(g|b);
-                }
-
-                List<byte> data;
-
-                byte[] pixels = new byte[(highres?2:8)];
-                int[] planes = new int[4];
-
-                int h = (int)myBitmap.PhysicalDimension.Height;
-                int w = (int)myBitmap.PhysicalDimension.Width;
-                byte[] st_buffer = new byte[320*200];
-
-                // the original picture height may not be 200 lines, we need to center it
-                int degas_offset = (200 - h)/2;
-
-                using (var fs = new FileStream(degas_source + pic.ToString("D5") + (highres?".pi3":".pi1"), FileMode.Create, FileAccess.Write)) {
-                    fs.Write(header, 0, header.Length);
-
-                    data = new List<byte>();
-
-                    int pixcount = 0;
-                    planes.Initialize();
-                    for (int y = 0; y < h; y++) {
-                        for (int x = 0; x < w; x++) {
-
-                            int coloridx = (int)originalpic[(originalpic.Length-2-h * w) + x + (y * (int)myBitmap.PhysicalDimension.Width)];
-
-                            //pixelData[degas_offset + x + (y * (int)myBitmap.PhysicalDimension.Width)] = (uint)coloridx; 
-                        
-                            int p0 = coloridx & 1;                        
-                            int p1 = (coloridx >> 1) & 1;
-                            int p2 = (coloridx >> 2) & 1;
-                            int p3 = (coloridx >> 3) & 1;
-                            planes[0] = (planes[0] << 1) | p0;
-                            planes[1] = (planes[1] << 1) | p1;
-                            planes[2] = (planes[2] << 1) | p2;
-                            planes[3] = (planes[3] << 1) | p3;
-                            pixcount++;
-                            if (pixcount == 16) {
-                                pixels.Initialize();
-                                pixels[0] = (byte)((planes[0] >> 8) & 0xff);
-                                pixels[1] = (byte)(planes[0] & 0xff);
-                                if (!highres) {
-                                    if (target_nb_bitplanes > 1) {
-                                        pixels[2] = (byte)((planes[1] >> 8) & 0xff);
-                                        pixels[3] = (byte)(planes[1] & 0xff);
-                                    }
-                                    if (target_nb_bitplanes > 2) {
-                                        pixels[4] = (byte)((planes[2] >> 8) & 0xff);
-                                        pixels[5] = (byte)(planes[2] & 0xff);
-                                    }
-                                    if (target_nb_bitplanes > 3) {
-                                        pixels[6] = (byte)((planes[3] >> 8) & 0xff);
-                                        pixels[7] = (byte)(planes[3] & 0xff);
-                                    }
-                                }
-                                
-                                data.AddRange(pixels.ToList<byte>());
-                                pixcount = 0;
-                            }
-                        }
-                    }
-
-                    int topmargin = (200 - h) * 80;
-                    for (int y = 0; y < h; y++)
-                    {
-                        for (int b = 0; b < 160; b++)
-                        {
-                            st_buffer[topmargin + y * 160 + b] = data[y * 160 + b];
-                        }
-                    }
-
-                    fs.Write(st_buffer, 0, 32000);
-                    header.Initialize();
-                    fs.Write(header, 0, 32); // fake color cycle data 
-                }
-                
-                //bw.ReportProgress(0, pixelData);
-            }
-        }
-
-
-
-        private void button1_Click(object sender, RoutedEventArgs e)
-        {
-            btn_pi1.IsEnabled = false;
-            btn_runtime.IsEnabled = false;
-            bw = new BackgroundWorker();
-            bw.WorkerSupportsCancellation = true;
-            bw.WorkerReportsProgress = true;
-            bw.ProgressChanged += bw_ProgressChanged;
-            bw.RunWorkerCompleted += bw_RunWorkerCompleted;
-            bw.DoWork += bw_MakeRun;
-            bw.RunWorkerAsync();
-
-        }
-
-        private void button_palette(object sender, RoutedEventArgs e)
-        {
-        }
-
-            private void bw_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
-        {
-            btn_pi1.IsEnabled = true;
-            btn_runtime.IsEnabled = true;
-        }
 
 
         private void bw_ProgressChanged2(object sender, ProgressChangedEventArgs e)
@@ -318,84 +172,84 @@ namespace BASTGenerator
 
         private static Action EmptyDelegate = delegate () { };
 
-        private void bw_MakeRun(object sender, DoWorkEventArgs e)
+        private void MakeRun()
         {
 
             int trim_start = first_pic;
-            int nb_files = last_pic + 1;
+            int nb_files = last_pic;
 
             bool write_file = true;
             
-            byte[] source = new byte[60000];
-            int[] frame = new int[17000];
-            int[] status_original = new int[17000];
-            int[] status = new int[17000];
+            byte[] source = new byte[4];
+            //int[] frame = new int[17000];
+            //int[] status_original = new int[17000];
+            //int[] status = new int[17000];
 
-            int[] old_frame = new int[17000];
-            int[] old_frame2 = new int[17000];
-            int[] old_frame3;
+            //int[] old_frame = new int[17000];
+            //int[] old_frame2 = new int[17000];
+            //int[] old_frame3;
 
-            int final_length = 0;
-            int softwareonly_length = 0;
+            //int final_length = 0;
+            //int softwareonly_length = 0;
 
-            byte[] tmpbuf = new byte[50];
+            //byte[] tmpbuf = new byte[50];
 
 
             //int final_framecount=(int)(((nb_files-trim_start)/(double)fps)*target_fps);
-            double frame_step = target_fps / (double)fps;
+            //double frame_step = target_fps / (double)fps;
 
-            if (audio_mux_only)
-                 goto compil;
+            //if (audio_mux_only)
+            //     goto compil;
 
-            using (System.IO.StreamWriter csv =
-                     new System.IO.StreamWriter(@"D:\ankha\log.csv")) {
+            //using (System.IO.StreamWriter csv =
+            //         new System.IO.StreamWriter(@"D:\ankha\log.csv")) {
 
 
-                for (int final_pic = (int)(trim_start * frame_step); final_pic <= (int)(nb_files * frame_step); final_pic++) {
+            //    for (int pic = trim_start; pic <= nb_files; pic++) {
 
-                    int pic = (int)(final_pic / frame_step);
-                    Console.Write(final_pic + " (" + pic + ") ");
+            //       // int pic = (int)(final_pic / frame_step);
+            //        Console.Write(pic+" ");
 
-                    // System.Threading.Thread.Sleep(1000);
+            //        // System.Threading.Thread.Sleep(1000);
 
-                    //old_source = source;
-                    old_frame3 = old_frame; // for rollback
-                    old_frame = old_frame2;
-                    old_frame2 = frame;
-                    source = new byte[60000];
-                    frame = new int[17000];
+            //        //old_source = source;
+            //        old_frame3 = old_frame; // for rollback
+            //        old_frame = old_frame2;
+            //        old_frame2 = frame;
+            //        source = new byte[60000];
+            //        frame = new int[17000];
 
-                    Array.Clear(status_original, 0, status_original.Length);
-                    // status values (comparison with previous frame)
-                    // 0 = no modification
-                    // 1 = modification
-                    // 2 = modification using register optimisation
-                    // 3 = no modification but taken into account for blitter optimization
-                    // 10 = copied with blitter but no modification (wasted time & storage)
-                    // 11 = copied with blitter
-                    // 12 = copied with blitter
-                    // 13 = copied with blitter but no modification (blitter "gap" optimization)
-                    // >15 = blitter fill
+            //        Array.Clear(status_original, 0, status_original.Length);
+            //        // status values (comparison with previous frame)
+            //        // 0 = no modification
+            //        // 1 = modification
+            //        // 2 = modification using register optimisation
+            //        // 3 = no modification but taken into account for blitter optimization
+            //        // 10 = copied with blitter but no modification (wasted time & storage)
+            //        // 11 = copied with blitter
+            //        // 12 = copied with blitter
+            //        // 13 = copied with blitter but no modification (blitter "gap" optimization)
+            //        // >15 = blitter fill
 
-                    // copy into int tab for easier comparisons between 16-bits words
-                    // status=1 if there is a difference with the previous frame
+            //        // copy into int tab for easier comparisons between 16-bits words
+            //        // status=1 if there is a difference with the previous frame
 
-                    int[] report = new int[status.Length];
+            //        int[] report = new int[status.Length];
 
-                    Array.Copy(status, report, status.Length);
-                    bw.ReportProgress(0, new Object[] { String.Format(original_image, pic), report });
+            //        Array.Copy(status, report, status.Length);
+            //        bw.ReportProgress(0, new Object[] { String.Format(original_image, pic), report });
 
-                    using (var runfs = new FileStream(String.Format(runtimefile, final_pic), FileMode.Create, FileAccess.Write)) {
-                        tmpbuf[0] = 0;
-                        tmpbuf[1] = 0;
-                        runfs.Write(tmpbuf, 0, 2);
-                    }
-                }
-            }
+            //        //using (var runfs = new FileStream(String.Format(runtimefile, final_pic), FileMode.Create, FileAccess.Write)) {
+            //        //    tmpbuf[0] = 0;
+            //        //    tmpbuf[1] = 0;
+            //        //    runfs.Write(tmpbuf, 0, 2);
+            //        //}
+            //    }
+            //}
             
 
-            Console.WriteLine("Final file: {0} (would be {1} without blitter)", final_length, softwareonly_length);
-            compil:
+            //Console.WriteLine("Final file: {0} (would be {1} without blitter)", final_length, softwareonly_length);
+            ////compil:
             if (write_file) {
                
                 byte[] bufsound = new byte[5000];
@@ -406,7 +260,7 @@ namespace BASTGenerator
                     double framesize = (double)soundfrq / target_fps;
                     double shouldbe = 0;
                     int current = 0;
-                    for (int pic = (int)(trim_start* frame_step); pic <= (int)(nb_files* frame_step); pic++) {
+                    for (int pic = trim_start; pic <= nb_files; pic++) {
                         using (var fs = new FileStream(String.Format(runtimesoundfile, pic), FileMode.Create, FileAccess.Write)) {
                             int toread = ste_channels * (pic==trim_start? (int)framesize-100: (int)framesize);
                             toread = (toread / 2) * 2; // always even
@@ -433,7 +287,7 @@ namespace BASTGenerator
                 int length = 0;
                 using (var final = new FileStream(finalvid, FileMode.Create, FileAccess.Write)) {
                     using (var index = new FileStream(finalindex, FileMode.Create, FileAccess.Write)) {
-                        for (int pic = (int)(trim_start*frame_step); pic <= (int)(nb_files* frame_step); pic++) {
+                        for (int pic = trim_start; pic <= nb_files; pic++) {
                             Console.WriteLine("Final file frame {0}", pic-trim_start);
                             int totallength = 0;
                             using (var fs = new FileStream(String.Format(runtimesoundfile, pic), FileMode.Open, FileAccess.Read)) {
@@ -449,12 +303,12 @@ namespace BASTGenerator
                             final.Write(bufsound, 0, length);
                             totallength = length + 4;
 
-                            using (var fs = new FileStream(String.Format(runtimefile, pic), FileMode.Open, FileAccess.Read)) {
-                                length = (int)fs.Length;
-                                fs.Read(source, 0, length);
-                            }
-                            final.Write(source, 0, length);
-                            totallength += length;
+                            //using (var fs = new FileStream(String.Format(runtimefile, pic), FileMode.Open, FileAccess.Read)) {
+                            //    length = (int)fs.Length;
+                            //    fs.Read(source, 0, length);
+                            //}
+                            //final.Write(source, 0, length);
+                            //totallength += length;
                             source[0] = (byte)((totallength >> 24) & 0xff);
                             source[1] = (byte)((totallength >> 16) & 0xff);
                             source[2] = (byte)((totallength >> 8) & 0xff);
@@ -473,6 +327,10 @@ namespace BASTGenerator
 
         }
 
+        private void btn_runtime_Click(object sender, RoutedEventArgs e)
+        {
+            MakeRun();
+        }
     }
 
 }
