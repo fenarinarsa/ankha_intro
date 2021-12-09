@@ -279,6 +279,13 @@ hwinits
 	move.b	#1,$fffffa1f.w
 	move.b	#8,$fffffa19.w
 
+	; add font palette to the background palette
+	lea	fontpal,a0
+	lea	palette+4*240,a1
+	moveq	#15,d0
+.palloop	move.l	(a0)+,(a1)+
+	dbra	d0,.palloop		
+
 	bsr	set_palette
 
 	; copy image to video RAM with the blitter
@@ -302,6 +309,30 @@ hwinits
 	move.w	#160,$ffff8a36.w  ; x word count
 	move.l	#bmpdata,$ffff8a24.w   ; src
 	move.l	screen_render_ptr,$ffff8a32.w   ; dest
+	move.b	#%11000000,$ffff8a3c.w ; start HOG
+	nop
+	nop
+	
+	; shift the font colors by 240
+	move.l	fontidx,a0
+	move.w	#(25*1534)/2-1,d0
+ftloop	add.w	#$F0F0,(a0)+
+	dbra	d0,ftloop
+	
+	; debug: copy 1 char to video RAM with the blitter
+	move.w	#25,$ffff8a38.w ; y count
+	move.w	#13,$ffff8a36.w  ; x word count
+	move.w	#2,$ffff8a20.w   ; src x byte increment
+	move.w	#2+1534-24,$ffff8a22.w   ; src y byte increment
+	move.w	#2,$ffff8a2e.w ; dst x increment
+	move.w     #2+640-26,$ffff8a30.w ; dst y increment
+	clr.b	$ffff8a3d.w    ; skew
+	move.w	#-1,$ffff8a28.w ; endmask1
+	move.w	#-1,$ffff8a2a.w ; endmask2
+	move.w	#-1,$ffff8a2c.w ; endmask3
+	move.w	#$0203,$ffff8a3a.w    ; HOP+OP: $010F=1fill/$0203=copy
+	move.l	fontidx+4,$ffff8a24.w   ; src
+	move.l	screen_display_ptr,$ffff8a32.w   ; dest
 	move.b	#%11000000,$ffff8a3c.w ; start HOG
 	nop
 	nop
@@ -982,12 +1013,21 @@ SmallTab	dc.b	0,38,0,48,0,0,0,42,43,44,0,46,41,45,47,0
 	dc.b	39,40,0,0,0,37,0
 	dc.b	11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27
 	dc.b	28,29,30,31,32,33,34,35,36,37,38,39,40,41
-	even
 
+	even
 image	incbin	"backgr.bmp"
 palette	EQU	image+$36
 bmpdata	EQU	image+$3FB
 
+	even
+fontimg	incbin	"carebear.bmp"
+fontpal	EQU	fontimg+$36
+fontidx	
+Xchar	SET	0
+	REPT	56
+	dc.l	fontimg+1070+Xchar
+Xchar	SET	Xchar+26
+	ENDR
 
 	section	bss
 
