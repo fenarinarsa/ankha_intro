@@ -201,8 +201,8 @@ hwinits
 
 	move.w	#$2700,sr
 
-	;movem.l	$ffff8240.w,d0-d7
-	;movem.l	d0-d7,old_palette
+	movem.l	$ffff8240.w,d0-d7
+	movem.l	d0-d7,old_palette
 
 	;move.b	$ffff8260.w,old_rez
 	;move.b	$ffff820a.w,old_hz
@@ -228,26 +228,6 @@ hwinits
 	move.l	#dummy_rte,$70.w	; temporary vbl
 	move.l	#dummy_rte,$68.w	; temporary hbl
 
-	;move	#$2300,sr
-	;stop	#$2300	; wait for vbl
-	;bset.b	#1,$ffff820a.w	; 50Hz
-	; sv2k17 60hz beam switch wait
-	;pea	s_waitfor60	; print wait message
-	;move.w	#9,-(sp)
-	;trap	#1
-	;addq	#6,sp
-	;move.w	#8,-(sp)	; press a key
-	;trap	#1
-	;addq	#2,sp
-	;stop	#$2300	; wait for vbl
-	;clr.b	$ffff8260.w	; lowrez
-	;move.w	#$2700,sr
-
-	; STE pal
-;	lea	palette,a0
-;	jsr	convert_palette_ste
-;	movem.l	palette,d0-d7
-;	movem.l	d0-d7,$ffff8240.w
 
 	move.l	#vbl,$70.w
 	move.l	#hbl,$68.w
@@ -319,25 +299,6 @@ hwinits
 ftloop	add.w	#$F0F0,(a0)+
 	dbra	d0,ftloop
 	
-	; debug: copy 1 char to video RAM with the blitter
-	move.w	#25,$ffff8a38.w ; y count
-	move.w	#13,$ffff8a36.w  ; x word count
-	move.w	#2,$ffff8a20.w   ; src x byte increment
-	move.w	#2+1534-24,$ffff8a22.w   ; src y byte increment
-	move.w	#2,$ffff8a2e.w ; dst x increment
-	move.w     #2+640-26,$ffff8a30.w ; dst y increment
-	clr.b	$ffff8a3d.w    ; skew
-	move.w	#-1,$ffff8a28.w ; endmask1
-	move.w	#-1,$ffff8a2a.w ; endmask2
-	move.w	#-1,$ffff8a2c.w ; endmask3
-	move.w	#$0203,$ffff8a3a.w    ; HOP+OP: $010F=1fill/$0203=copy
-	move.l	fontidx+4,$ffff8a24.w   ; src
-	move.l	screen_display_ptr,$ffff8a32.w   ; dest
-	;move.b	#%11000000,$ffff8a3c.w ; start HOG
-	nop
-	nop
-	
-	;jsr	scrolltext
 
 	move.w	#$2300,sr
 
@@ -538,13 +499,10 @@ video_end
 	move.l	#dummy_rte,$70.w	; temporary vbl
 	move.l	#dummy_rte,$68.w	; temporary hbl
 	move.w	#$2300,sr		; wait for vbl
-	;movem.l	old_palette,d0-d7
-	;movem.l	d0-d7,$ffff8240.w
+	movem.l	old_palette,d0-d7
+	movem.l	d0-d7,$ffff8240.w
 	;move.b	old_rez,$ffff8260.w
 	;move.b	old_hz,$ffff820a.w
-	;move.b	old_screen+1,$ffff8201.w
-	;move.b	old_screen+2,$ffff8203.w
-	;move.b	old_screen+3,$ffff820d.w
 	move.l	old_screen,screen_display_ptr
 	bsr	set_videoaddr
 
@@ -649,15 +607,6 @@ vbl_debug	move.w	$ffff8240.w,-(sp)
 	moveq	#7,d6
 	bsr	textprint
 
-	; last rendered frame
-	;lea	s_hex,a6
-	;move.l	a6,a0
-	;move.w	rendered_frame,d0
-	;bsr	itoahex
-	;move.l	a6,a0
-	;addq.l	#4,a0
-	;moveq	#3,d6
-	;bsr	textprint
 
 	rts
 	
@@ -1191,6 +1140,8 @@ Save_Vec	ds.l	17
 old_screen
 	ds.l	1
 old_ints	ds.b	25
+old_palette
+	ds.w	16
 	even
 vid_index	ds.w	nb_frames+1
 play_index	ds.l	nb_frames+1
