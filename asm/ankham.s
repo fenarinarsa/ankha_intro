@@ -43,9 +43,9 @@ LStartM	EQU	$C
 LStartL	EQU	$D
 
 emu	EQU	0	; 1=emulate HDD access timings by adding NOPs
-ram_limit	EQU	260*1024	; 0=no limit, other=malloc size
+ram_limit	EQU	1024*1024	; 0=no limit, other=malloc size
 blitter	EQU	1	; 1=use blitter 0=emulate blitter (not complete, for debug purpose only)
-minimum_load EQU	128*400	; minimum size of a disk read (to optimize FREADs)
+minimum_load EQU	128*1000	; minimum size of a disk read (to optimize FREADs)
 loop_play	EQU	1
 monochrome EQU 0
 
@@ -58,7 +58,7 @@ loop_frame EQU	111
 linewidth	EQU	640	; 640 for 640x480 and 320 for 320x240
 vidwidth	EQU	linewidth/4
 
-SWITCH_FRAMES EQU	110	; nb of frames between pictures swap 
+SWITCH_FRAMES EQU	880	; nb of frames between pictures swap 
 
 DMASNDST	MACRO
 	move.l	\1,d0
@@ -104,7 +104,14 @@ color_debug MACRO
 	ENDC
 .\@
 	ENDM
-
+	
+vga_debug	MACRO
+	;move.b	#$FF,DAC_PEL ; pixel mask
+	move.b	#0,DAC_IW
+	move.b	#\1,DAC_D	; write R
+	move.b	#\2,DAC_D	; write G
+	move.b	#\3,DAC_D	; write B
+	ENDM
 
 	*** Mshrink
 	movea.l   4(sp),a5
@@ -233,7 +240,6 @@ hwinits
 	move.l	#dummy_rte,$70.w	; temporary vbl
 	move.l	#dummy_rte,$68.w	; temporary hbl
 
-
 	move.l	#vbl,$70.w
 	move.l	#hbl,$68.w
 
@@ -244,7 +250,7 @@ hwinits
 	move.b	#%00100001,$fffffa13.w	; timer a/b only
 	and.b	#%11100000,$fffffa15.w	; all but timer C & ACIA / HDC controller
 	or.b	#%01000000,$fffffa15.w	; enable ACIA
-	bclr	#3,$fffffa17.w
+	bclr	#3,$fffffa17.w	; AEI
 
 	; find the ST video address for debug purpose
 	move.b	$ffff8201.w,screen_debug_ptr+1
@@ -264,15 +270,45 @@ hwinits
 	move.b	#1,$fffffa1f.w
 	move.b	#8,$fffffa19.w
 
+	; prepare all palettes
 	move.l	pal0,a0
+	lea	vgapal0,a1
+	move.w	#239,d0
 	bsr	copy_palette
-
+	move.l	pal1,a0
+	lea	vgapal1,a1
+	move.w	#239,d0
+	bsr	copy_palette
+	move.l	pal2,a0
+	lea	vgapal2,a1
+	move.w	#239,d0
+	bsr	copy_palette	
 	; add font palette to the background palette
 	lea	fontpal,a0
-	lea	vgapal+4*240,a1
+	lea	vgapal0+4*240,a1
 	moveq	#15,d0
-.palloop	move.l	(a0)+,(a1)+
-	dbra	d0,.palloop		
+	bsr	copy_palette
+	lea	fontpal,a0
+	lea	vgapal1+4*240,a1
+	moveq	#15,d0
+	bsr	copy_palette
+	lea	fontpal,a0
+	lea	vgapal2+4*240,a1
+	moveq	#15,d0
+	bsr	copy_palette
+	; prepare palettes for ET4000's 6-bits DAC
+	lea	vgapal0,a0
+	move.l	a0,pal0
+	move.w	#255,d0
+	bsr	prepare_palette
+	lea	vgapal1,a0
+	move.l	a0,pal1
+	move.w	#255,d0
+	bsr	prepare_palette
+	lea	vgapal2,a0
+	move.l	a0,pal2
+	move.w	#255,d0
+	bsr	prepare_palette	
 
 	; clear 3 screens
 	move.w	#240*3,$ffff8a38.w ; y count
@@ -323,9 +359,19 @@ hwinits
 	move.w	#(25*1534)/2-1,d0
 ftloop	add.w	#$F0F0,(a0)+
 	dbra	d0,ftloop
-	
 
+	; detect VGA Vsync
+	; and setup Timer B faster than 60Hz (40000 MFP cycles)
+	; VGA is around 60.15Hz (40 858 MFP cycles)
+	; Timer B handler will then wait for vblank
+	sf	$fffffa1b.w	; stop TB
+	move.l	#tb_render,$120.w
+	bsr	vsync
+	move.b	#203,$fffffa21.w	; counter=200
+	move.b	#7,$fffffa1b.w	; divider=200
 	move.w	#$2300,sr
+
+
 
 
 *** MAIN LOOP
@@ -428,7 +474,7 @@ enableplay
 
 first_refresh
 	move.w	#-2,b_first_refresh	; not so bool after all
-.wait	cmp.w	#30,vbl_count	; wait at least 30 frames you damn emulator
+.wait	cmp.w	#60,vbl_count	; wait at least 30 frames you damn emulator
 	blt.s	.wait
 	; clear screen
 	clr.w	b_first_refresh
@@ -548,11 +594,11 @@ video_end
 	move.b	#$c0,$fffffa23.w	; fix key repeat
 
 	; at least reset VGA color #0 to white
-	lea	vgapal,a0
+	move.l	pal0,a0
 	move.b	#$FF,(a0)+
 	move.b	#$FF,(a0)+
 	move.b	#$FF,(a0)
-	jsr	set_palette
+	bsr	set_palette
 
 	move.w	#$2300,sr
 
@@ -575,18 +621,9 @@ end	; PTERM
 * Frame is rendered by running the generated code + blitter data loaded from file
 * VBL only prints debug data
 
-vbl	addq.w	#1,vbl_count
-	; enable Timer B at line 199
-	; which will fire HBL in return
-	sf	$fffffa1b.w
-	IFEQ	monochrome
-	move.l	#tb_render,$120.w
-	ELSE
-	move.l	#tb_mono,$120.w
-	ENDC
-	move.b	#199,$fffffa21.w
-	move.b	#8,$fffffa1b.w
-
+vbl	;addq.w	#1,vbl_count
+	rte
+	
 vbl_debug	move.w	$ffff8240.w,-(sp)
 	color_debug $555
 
@@ -638,17 +675,16 @@ vbl_debug	move.w	$ffff8240.w,-(sp)
 	addq.l	#2,a0
 	moveq	#7,d6
 	bsr	textprint
-
-
 	rts
 	
 
 * Timer A
-* used only for debugging to check when the audio DMA buffer loops
-timer_a	move.b	#1,$fffffa1f.w
-	color_debug $700
 
-	movem.l	d0-a6,-(sp)
+timer_a	move.b	#1,$fffffa1f.w
+	;color_debug $700
+	;vga_debug	$ff,$00,$00
+
+	movem.l	d0-d1/a0-a1,-(sp)
 
 	tst.w	b_buffering_lock
 	bne	endrender
@@ -703,17 +739,33 @@ enter_buffering
 	move.w	#-1,b_buffering_lock
 
 endrender	
-	movem.l	(sp)+,d0-a6
-	color_debug $000
+	movem.l	(sp)+,d0-d1/a0-a1
+	;color_debug $000
+	;vga_debug $00,$00,$00
 dummy_rte	rte
 
-* RENDER is triggered by HBL
-* because this way it can be interrupted by VBL (frame counter/debug info) and MFP (Timer A/B)
-* it's triggered by a Timer B event at the last visible line to swap buffers ASAP
-* if a render is already in progress HBL is not enabled for this frame
+* RENDER is triggered by Timer B
+* to be in sync with the card's vsync
+* VBL is of no use here
 
 
 tb_render	sub.w	#1,framecount
+	addq	#1,vbl_count
+	;vga_debug	$00,$ff,$ff
+
+	;bsr	set_videoaddr	; must be done BEFORE vsync
+
+	; wait for vsync
+	btst	#3,INSTATUS1
+	bne.s	.invsync
+.waitvsync
+	btst	#3,INSTATUS1
+	beq.s	.waitvsync
+
+.invsync	sf	$fffffa1b.w	; stop TB
+	move.b	#203,$fffffa21.w	; counter=200
+	move.b	#7,$fffffa1b.w	; divider=200
+
 	tst.w	b_lock_render
 	bne.s	.locked		; don't enable HBL if a render is already in progress
 	and.w	#$f0ff,(sp)
@@ -726,6 +778,7 @@ b_lock_render
 hbl	move.w	$ffff8240.w,-(sp)
 	; green
 	color_debug $070
+	vga_debug $00,$FF,$00
 
 	tst.w	b_lock_render
 	bne	endhbl		; render already in progress (actually should not happen)
@@ -734,33 +787,41 @@ hbl	move.w	$ffff8240.w,-(sp)
 	movem.l	d0-a6,-(sp)
 
 	tst.w	framecount
-	bpl.s	.noswitch
+	bne.s	.noframezero
 
-	; switch screens
-	move.l	screen0_ptr,a0
-	move.l	screen1_ptr,screen0_ptr
-	move.l	screen2_ptr,screen1_ptr
-	move.l	a0,screen2_ptr
-
+	; frame zero: changing the vid ptr at next vsync
 	move.l	vid0_ptr,a0
 	move.l	vid1_ptr,vid0_ptr
 	move.l	vid2_ptr,vid1_ptr
 	move.l	a0,vid2_ptr
 	
+	bsr	set_videoaddr
+
+	bra.s	.noswitch
+	
+.noframezero
+	bpl.s	.noswitch
+	; switch screens
+	move.l	screen0_ptr,a0
+	move.l	screen1_ptr,screen0_ptr
+	move.l	screen2_ptr,screen1_ptr
+	move.l	a0,screen2_ptr
+	
+	; switch palettes
 	move.l	pal1,a0
 	move.l	pal2,pal1
 	move.l	pal0,pal2
 	move.l	a0,pal0
 	
-	jsr	set_videoaddr
-	jsr	copy_palette
-	jsr	set_palette
+	;jsr	set_videoaddr
+	;bsr	copy_palette
+	bsr	set_palette
 	move.w	#SWITCH_FRAMES,framecount
 
 .noswitch	tst.w	b_buffering_lock
 	bne	nohblrender
 
-	jsr	scrolltext
+	bsr	scrolltext
 
 	;add.w	#1,rendered_frame 	; for debug purpose only
 
@@ -781,6 +842,7 @@ nohblrender
 	
 	clr.w	b_lock_render
 endhbl	move.w	(sp)+,$ffff8240.w
+	vga_debug $00,00,$ff
 	and.w	#$f0ff,(sp)
 	or.w	#$0300,(sp)	; disable HBL after rte (should not work on 68030+)
 	rte
@@ -799,33 +861,43 @@ set_screen
 
 
 	; a0=palette source
+	; a1=dest
+	; d0=nb colors-1
 copy_palette
-	lea	vgapal,a1
-	move.w	#239,d0
 .loop	move.b	(a0)+,(a1)+
 	move.b	(a0)+,(a1)+
-	move.b	(a0),(a1)
-	addq	#2,a0
-	addq	#2,a1
+	move.b	(a0)+,(a1)+
+	move.b	(a0)+,(a1)+
 	dbra	d0,.loop
 	rts
 
-; 18-bits palette so each component must be >>2	
-set_palette	
-	move.b	#$FF,DAC_PEL ; pixel mask
-	move.w	#255,d0
-	lea	vgapal,a0
-	move.b	#0,DAC_IW	; start pal index #0
+; 18-bits palette so each component must be >>2
+; reorder the palette (RGB instead of BGRA)
+; d0=nb of colors-2
+; a0=palette address	
+prepare_palette	
+	move.l	a0,a1
 .pal	move.b	(a0)+,d1
 	move.b	(a0)+,d2
 	move.b	(a0),d3
-	addq	#2,a0	; skip 4th byte
+	addq	#2,a0
 	lsr.b	#2,d1
 	lsr.b	#2,d2
 	lsr.b	#2,d3
-	move.b	d3,DAC_D	; write R
-	move.b	d2,DAC_D	; write G
-	move.b	d1,DAC_D	; write B
+	move.b	d3,(a1)+	; write R
+	move.b	d2,(a1)+	; write G
+	move.b	d1,(a1)+	; write B
+	dbra	d0,.pal
+	rts
+	
+set_palette	
+	move.b	#$FF,DAC_PEL ; pixel mask
+	move.w	#255,d0
+	move.l	pal0,a0
+	move.b	#0,DAC_IW	; start pal index #0
+.pal	move.b	(a0)+,DAC_D
+	move.b	(a0)+,DAC_D
+	move.b	(a0)+,DAC_D
 	dbra	d0,.pal
 	rts
 
@@ -1158,7 +1230,7 @@ vid_buffer	dc.l	0
 vid_buffer_end
 	dc.l	0
 framecount
-	dc.w	SWITCH_FRAMES
+	dc.w	SWITCH_FRAMES+322
 swap_buffers
 	dc.w	-1
 
@@ -1238,7 +1310,9 @@ old_palette
 	ds.w	16
 vid_index	ds.w	nb_frames+1
 play_index	ds.l	nb_frames+1
-vgapal	ds.l	256
+vgapal0	ds.l	256
+vgapal1	ds.l	256
+vgapal2	ds.l	256
 buf_nothing
 	ds.w	40
 buf_nothing_end
