@@ -3,12 +3,12 @@
 VASM = vasm -Ftos -devpac
 LZ4 = lz4.exe
 
-all: ankha.tos
+all: ankha_in.prg
 
-ankha.tos: ankham.s small
-	$(VASM) -o ankham.tos ankham.s
+ankha_in.prg: ankham.s small
+	$(VASM) -o ankha_in.tos ankham.s
 
 clean:
-	del ankham.tos
+	del ankha_in.prg
 
 	

@@ -1,5 +1,5 @@
 
-* ANKHA Menu ATari Mega STE NOVA ET4000
+* ANKHA Intro ATari Mega STE NOVA ET4000
 * Copyright (C) 2021 fenarinarsa (Cyril Lambin)
 *
 * This program is free software: you can redistribute it and/or modify
@@ -16,6 +16,10 @@
 * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 * Any complain of badly written "it looks like 30 years old" code can be sent to
+* Code is shit because it's all patched from my previous Bad Apple player
+* and I had to develop directly on my Mega STE since there is no VGA support
+* in ST emulators. So a lot of comments are obsolete
+*
 * Twitter @fenarinarsa
 * Mastodon @fenarinarsa@shelter.moe
 * Web fenarinarsa.com
@@ -29,7 +33,7 @@
 
 ; note: adding $FE000000 to VME addresses
 ; should them TT compatible without breaking
-; things on Mega STE
+; things on Mega STE... I think?
 SCREEN	EQU	$FEC00000
 DAC_PEL	EQU	$FEDC03C6
 DAC_IR	EQU	$FEDC03C7
@@ -55,7 +59,7 @@ intro_shift EQU	0
 nb_frames	EQU	2332	; number of frames in file
 loop_frame EQU	111
 
-linewidth	EQU	640	; 640 for 640x480 and 320 for 320x240
+linewidth	EQU	320	; 640 for 640x480 and 320 for 320x240
 vidwidth	EQU	linewidth/4
 
 SWITCH_FRAMES EQU	880	; nb of frames between pictures swap 
@@ -106,11 +110,10 @@ color_debug MACRO
 	ENDM
 	
 vga_debug	MACRO
-	;move.b	#$FF,DAC_PEL ; pixel mask
-	move.b	#0,DAC_IW
-	move.b	#\1,DAC_D	; write R
-	move.b	#\2,DAC_D	; write G
-	move.b	#\3,DAC_D	; write B
+	;move.b	#0,DAC_IW
+	;move.b	#\1,DAC_D	; write R
+	;move.b	#\2,DAC_D	; write G
+	;move.b	#\3,DAC_D	; write B
 	ENDM
 
 	*** Mshrink
@@ -1236,9 +1239,9 @@ swap_buffers
 
 
 s_vid_filename
-	dc.b	"F:\ANKHAM\AUDIO.DAT",0
+	dc.b	"AUDIO.DAT",0
 s_idx_filename
-	dc.b	"F:\ANKHAM\AUDIO.IDX",0
+	dc.b	"AUDIO.IDX",0
 s_debug_load
 	dc.b	"LOAD ",0
 s_debug_play
@@ -1254,16 +1257,26 @@ s_errfile
 	dc.b	"File error",10,13,0
 
 text	dc.b	"             "
-	dc.b	"LALALALA DOES IT WORK AND THIS FONT"
-	dc.b	"#A DOES NOT HAVE ANY KIND OF QUESTION#B MARK I'M SO DISAPPOINTED"
-	dc.b	" BUT AT LEAST I#JCAN CHANGE SPEED OF THIS SCROLLER AND MAKE"
-	dc.b	" IT VERY FAST"
-	dc.b	"             #B"
+	dc.b	"VGA CARD DETECTED             "
+	dc.b	"#A LOOKS LIKE YOU'RE THE LUCKY OWNER OF A MSTE WITH AN ET4000 CARD"
+	dc.b	"      #C SO LET'S ENJOY SPEED AND COLORS WITH THIS SMALL INTRO! "
+	dc.b	"      -CREDITS-       MUSIC DDAMAGE     GFX ZONE     CODE FENARINARSA"
+	dc.b	"                "
+	dc.b	" SORRY FOR THE VIDEO AND AUDIO BUGS. #DHERE'S A FULL EXPLANATION WHY:         #KGUESS WHAT NO BLOODY ST EMULATOR KNOWS WHAT"
+	dc.b	" A VGA CARD IS SO NO CROSSDEV FOR ME AND BOY I DIDN'T MISS DEV ON REAL HARDWARE AND TIME IS RUNNING OUT"
+	dc.b	" SO YES THERE'S AUDIO CRACKS AND SOME VIDEO GLITCHES, NOVA CARDS DON'T HAVE VSYNC INTERRUPT BECAUSE"
+	dc.b	" BASIC VGA CARDS ARE SLOW SHIT                  #C"
+	dc.b	" FOR SHORT IT'S A     #ASILLYVENTURE PARTY RELEASE #C         "
+	dc.b	" THE MUSIC IS A 50KHZ STEREO PCM STREAMED FROM HDD. YEAH IT'S BIG BUT #B----I KNOW---- #CYOU ALL HAVE COSMOSEX OR ULTRASATAN WITH ---UNUSED DISK SPACE---"
+	dc.b	"           THANKS TO JB FROM DDAMAGE FOR THE ORIGINAL TUNE BTW - MERCI MEC!                 "
+	dc.b	"           I DIDN'T CHOOSE THE PICTURES RANDOMLY - THIS INTRO IS ALSO A TRAILER OF WHO'S COMING NEXT FOR YOUR --STANDARD SHIFTER-- STE"
+	dc.b	"      FOLLOW ME #B  FENARINARSA ON TWITTER #C      IF YOU DON'T WANT TO MISS THE RELEASE. HOPEFULLY BEFORE CHRISTMAS!           LATER!      "
+	dc.b	"             #B "
 	dc.b	0
 	even
 textptr	dc.l	text
 textshift	dc.w	0
-textspeed	dc.w	2
+textspeed	dc.w	4
 
 	even
 
