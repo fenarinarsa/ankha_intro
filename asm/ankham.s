@@ -28,7 +28,7 @@
 ; registers located at $DC0000 (Mega STE)
 
 ; note: adding $FE000000 to VME addresses
-; makes them TT compatible without breaking
+; should them TT compatible without breaking
 ; things on Mega STE
 SCREEN	EQU	$FEC00000
 DAC_PEL	EQU	$FEDC03C6
@@ -52,8 +52,13 @@ monochrome EQU 0
 line_length EQU 	160
 horz_shift	 EQU	1
 intro_shift EQU	0
-nb_frames	EQU	4664	; number of frames in file
-loop_frame EQU	222
+nb_frames	EQU	2332	; number of frames in file
+loop_frame EQU	111
+
+linewidth	EQU	640	; 640 for 640x480 and 320 for 320x240
+vidwidth	EQU	linewidth/4
+
+SWITCH_FRAMES EQU	110	; nb of frames between pictures swap 
 
 DMASNDST	MACRO
 	move.l	\1,d0
@@ -246,7 +251,7 @@ hwinits
 	move.b	$ffff8203.w,screen_debug_ptr+2
 	move.b	$ffff820d.w,screen_debug_ptr+3
 
-	move.b     #%10,$FFFF8921.w	; 25kHz stereo
+	move.b     #%11,$FFFF8921.w	; 50kHz stereo
 	;move.b     #%10000001,$FFFF8921.w	; 12kHz mono
 	lea	buf_nothing,a0
 	DMASNDST	a0
@@ -259,7 +264,7 @@ hwinits
 	move.b	#1,$fffffa1f.w
 	move.b	#8,$fffffa19.w
 
-	lea	pal0,a0
+	move.l	pal0,a0
 	bsr	copy_palette
 
 	; add font palette to the background palette
@@ -275,7 +280,7 @@ hwinits
 	move.w	#2,$ffff8a20.w   ; src x byte increment
 	move.w	#2,$ffff8a22.w   ; src y byte increment
 	move.w	#2,$ffff8a2e.w ; dst x increment
-	move.w     #322,$ffff8a30.w ; dst y increment
+	move.w     #2+(linewidth-320),$ffff8a30.w ; dst y increment
 	clr.b	$ffff8a3d.w    ; skew
 	move.w	#-1,$ffff8a28.w ; endmask1
 	move.w	#-1,$ffff8a2a.w ; endmask2
@@ -436,14 +441,14 @@ check_ikbd	cmp.b	#$1+$80,$fffffc02.w	; ESC depressed
 	addq	#4,sp
 	bra	video_end
 .no_esc	clr.w	debug_color
-	cmp.b	#$4e+$80,$fffffc02.w  ; + depressed
-	bne.s	.noplus
-	move.w	#-1,debug_info
-	bsr	.endcheck
-.noplus	cmp.b	#$4a+$80,$fffffc02.w  ; - depressed
-	bne.s	.nominus
-	clr.w	debug_info
-	bsr	.endcheck
+;	cmp.b	#$4e+$80,$fffffc02.w  ; + depressed
+;	bne.s	.noplus
+;	move.w	#-1,debug_info
+;	bsr	.endcheck
+;.noplus	cmp.b	#$4a+$80,$fffffc02.w  ; - depressed
+;	bne.s	.nominus
+;	clr.w	debug_info
+;	bsr	.endcheck
 .nominus	cmp.b	#$2a,$fffffc02.w	; Left-shift pressed
 	bne.s	.endcheck
 	move.w	#-1,debug_color
@@ -523,7 +528,7 @@ video_end
 	movem.l	d0-d7,$ffff8240.w
 	;move.b	old_rez,$ffff8260.w
 	;move.b	old_hz,$ffff820a.w
-	move.l	old_screen,screen0_ptr
+	move.l	old_screen,vid0_ptr
 	bsr	set_videoaddr
 
 	lea	old_ints,a0
@@ -707,14 +712,9 @@ dummy_rte	rte
 * it's triggered by a Timer B event at the last visible line to swap buffers ASAP
 * if a render is already in progress HBL is not enabled for this frame
 
-	; monochrome mode needs Timer B two times because the render takes place at line 390
-tb_mono	sf	$fffffa1b.w
-	move.l	#tb_render,$120.w
-	move.b	#190,$fffffa21.w	; 10 lines earlier: Timer B may be fired too late because of blitter transfers
-	move.b	#8,$fffffa1b.w
-	rte
 
-tb_render	tst.w	b_lock_render
+tb_render	sub.w	#1,framecount
+	tst.w	b_lock_render
 	bne.s	.locked		; don't enable HBL if a render is already in progress
 	and.w	#$f0ff,(sp)
 	or.w	#$0100,(sp)	; enable HBL after rte
@@ -733,7 +733,31 @@ hbl	move.w	$ffff8240.w,-(sp)
 
 	movem.l	d0-a6,-(sp)
 
-	tst.w	b_buffering_lock
+	tst.w	framecount
+	bpl.s	.noswitch
+
+	; switch screens
+	move.l	screen0_ptr,a0
+	move.l	screen1_ptr,screen0_ptr
+	move.l	screen2_ptr,screen1_ptr
+	move.l	a0,screen2_ptr
+
+	move.l	vid0_ptr,a0
+	move.l	vid1_ptr,vid0_ptr
+	move.l	vid2_ptr,vid1_ptr
+	move.l	a0,vid2_ptr
+	
+	move.l	pal1,a0
+	move.l	pal2,pal1
+	move.l	pal0,pal2
+	move.l	a0,pal0
+	
+	jsr	set_videoaddr
+	jsr	copy_palette
+	jsr	set_palette
+	move.w	#SWITCH_FRAMES,framecount
+
+.noswitch	tst.w	b_buffering_lock
 	bne	nohblrender
 
 	jsr	scrolltext
@@ -742,8 +766,8 @@ hbl	move.w	$ffff8240.w,-(sp)
 
 	; check if unchanged frame
 	; apply to frame N-2 so we need to save this
-	tst.w	swap_buffers
-	beq	nohblrender
+;	tst.w	swap_buffers
+;	beq	nohblrender
 
 	; swap video buffers
 	; so next vbl we're gonna see the frame rendered 2 vbls ago
@@ -815,11 +839,11 @@ vsync	btst	#3,INSTATUS1
 	; set screen base address
 set_videoaddr
 	move.b	#LStartL,CRTC_I
-	move.b	screen0_ptr+3,CRTC_D
+	move.b	vid0_ptr+3,CRTC_D
 	move.b	#LStartM,CRTC_I
-	move.b	screen0_ptr+2,CRTC_D
+	move.b	vid0_ptr+2,CRTC_D
 	move.b	#LStartH,CRTC_I
-	move.b	screen0_ptr+1,CRTC_D
+	move.b	vid0_ptr+1,CRTC_D
 	rts
 	
 *** SCROLLTEXT
@@ -840,7 +864,7 @@ scrolltext
 	move.w	#$0203,$ffff8a3a.w    ; HOP+OP: $010F=1fill/$0203=copy
 	
 	move.l	screen0_ptr,a6
-	add.l	#(240-25)*640,a6	; screen bottom
+	add.l	#(240-25)*linewidth,a6	; screen bottom
 	move.l	textptr,a5
 	lea	fontidx,a4
 	moveq	#11,d7
@@ -868,7 +892,7 @@ scrolltext
 	move.w	d1,d4
 	move.w	#2+1536,d2
 	sub.w	d1,d2	; src y byte increment
-	move.w	#2+640,d3
+	move.w	#2+linewidth,d3
 	sub.w	d1,d3	; dst y increment
 	lsr.w	#1,d1	; x word count
 
@@ -901,7 +925,7 @@ scrolltext
 	move.w	#25,$ffff8a38.w ; y count
 	move.w	#13,$ffff8a36.w  ; x word count
 	move.w	#2+1534-24,$ffff8a22.w   ; src y byte increment
-	move.w	#2+640-26,$ffff8a30.w ; dst y increment
+	move.w	#2+linewidth-26,$ffff8a30.w ; dst y increment
 	move.l	a0,$ffff8a24.w   ; src
 	move.l	a6,$ffff8a32.w   ; dest
 	move.b	#%11000000,$ffff8a3c.w ; start HOG
@@ -932,7 +956,7 @@ scrolltext
 	sub.w	#26,d1
 .noovflow	move.w	#2+1536,d2
 	sub.w	d1,d2	; src y byte increment
-	move.w	#2+640,d3
+	move.w	#2+linewidth,d3
 	sub.w	d1,d3	; dst y increment
 	lsr.w	#1,d1	; x word count
 
@@ -1097,9 +1121,13 @@ b_fileerror
 screen0_ptr
 	dc.l	SCREEN
 screen1_ptr 
-	dc.l	SCREEN+(640*240)
+	dc.l	SCREEN+(linewidth*240)
 screen2_ptr
-	dc.l	SCREEN+(640*480)
+	dc.l	SCREEN+(linewidth*480)
+vid0_ptr	dc.l	SCREEN
+vid1_ptr	dc.l	SCREEN+(vidwidth*240)
+vid2_ptr	dc.l	SCREEN+(vidwidth*480)
+
 screen_debug_ptr
 	dc.l	buf_nothing_end
 file_handle
@@ -1129,8 +1157,8 @@ size_toload
 vid_buffer	dc.l	0
 vid_buffer_end
 	dc.l	0
-rendered_frame
-	dc.w	0
+framecount
+	dc.w	SWITCH_FRAMES
 swap_buffers
 	dc.w	-1
 
@@ -1178,15 +1206,15 @@ SmallTab	dc.b	0,38,0,48,0,0,0,42,43,44,0,46,41,45,47,0
 
 	even
 back0	incbin	"back0.bmp"
-pal0	EQU	back0+$36
+pal0	dc.l	back0+$36
 image0	EQU	back0+1014 ;$3FB
 	even
 back1	incbin	"back1.bmp"
-pal1	EQU	back1+$36
+pal1	dc.l	back1+$36
 image1	EQU	back1+1014 ;$3FB
 	even
 back2	incbin	"back2.bmp"
-pal2	EQU	back2+$36
+pal2	dc.l	back2+$36
 image2	EQU	back2+1014 ;$3FB	even
 	even
 fontimg	incbin	"carebear.bmp"
