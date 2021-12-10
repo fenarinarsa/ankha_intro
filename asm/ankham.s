@@ -22,7 +22,7 @@
 
 	;opt d+
 
-; The demo must be ran in 640x480x256c
+; The demo must be ran in 320x240x256c 60Hz
 ; Compatible with ET4000 on NOVA adapter only
 ; framebuffer located at $C00000 (Mega STE)
 ; registers located at $DC0000 (Mega STE)
@@ -52,8 +52,8 @@ monochrome EQU 0
 line_length EQU 	160
 horz_shift	 EQU	1
 intro_shift EQU	0
-nb_frames	EQU	3821	; number of frames in file
-loop_frame EQU	100
+nb_frames	EQU	4664	; number of frames in file
+loop_frame EQU	222
 
 DMASNDST	MACRO
 	move.l	\1,d0
@@ -246,7 +246,7 @@ hwinits
 	move.b	$ffff8203.w,screen_debug_ptr+2
 	move.b	$ffff820d.w,screen_debug_ptr+3
 
-	move.b     #%11,$FFFF8921.w	; 50kHz stereo
+	move.b     #%10,$FFFF8921.w	; 25kHz stereo
 	;move.b     #%10000001,$FFFF8921.w	; 12kHz mono
 	lea	buf_nothing,a0
 	DMASNDST	a0
@@ -259,17 +259,18 @@ hwinits
 	move.b	#1,$fffffa1f.w
 	move.b	#8,$fffffa19.w
 
+	lea	pal0,a0
+	bsr	copy_palette
+
 	; add font palette to the background palette
 	lea	fontpal,a0
-	lea	palette+4*240,a1
+	lea	vgapal+4*240,a1
 	moveq	#15,d0
 .palloop	move.l	(a0)+,(a1)+
 	dbra	d0,.palloop		
 
-	bsr	set_palette
-
-	; copy image to video RAM with the blitter
-	move.w	#240,$ffff8a38.w ; y count
+	; clear 3 screens
+	move.w	#240*3,$ffff8a38.w ; y count
 	move.w	#160,$ffff8a36.w  ; x word count
 	move.w	#2,$ffff8a20.w   ; src x byte increment
 	move.w	#2,$ffff8a22.w   ; src y byte increment
@@ -279,16 +280,35 @@ hwinits
 	move.w	#-1,$ffff8a28.w ; endmask1
 	move.w	#-1,$ffff8a2a.w ; endmask2
 	move.w	#-1,$ffff8a2c.w ; endmask3
-	move.w	#$0203,$ffff8a3a.w    ; HOP+OP: $010F=1fill/$0203=copy
-	move.l	#bmpdata,$ffff8a24.w   ; src
-	move.l	screen_display_ptr,$ffff8a32.w   ; dest
+	move.w	#$0100,$ffff8a3a.w    ; HOP+OP: $0100=0fill
+	move.l	#image0,$ffff8a24.w   ; src
+	move.l	screen0_ptr,$ffff8a32.w   ; dest
 	move.b	#%11000000,$ffff8a3c.w ; start HOG
 	nop
 	nop
-	move.w	#240,$ffff8a38.w ; y count
+
+	bsr	set_palette
+
+	; copy image to video RAM with the blitter
+	move.w	#214,$ffff8a38.w ; y count
 	move.w	#160,$ffff8a36.w  ; x word count
-	move.l	#bmpdata,$ffff8a24.w   ; src
-	move.l	screen_render_ptr,$ffff8a32.w   ; dest
+	move.w	#$0203,$ffff8a3a.w    ; HOP+OP: $010F=1fill/$0203=copy
+	move.l	#image0,$ffff8a24.w   ; src
+	move.l	screen0_ptr,$ffff8a32.w   ; dest
+	move.b	#%11000000,$ffff8a3c.w ; start HOG
+	nop
+	nop
+	move.w	#214,$ffff8a38.w ; y count
+	move.w	#160,$ffff8a36.w  ; x word count
+	move.l	#image1,$ffff8a24.w   ; src
+	move.l	screen1_ptr,$ffff8a32.w   ; dest
+	move.b	#%11000000,$ffff8a3c.w ; start HOG
+	nop
+	nop
+	move.w	#214,$ffff8a38.w ; y count
+	move.w	#160,$ffff8a36.w  ; x word count
+	move.l	#image2,$ffff8a24.w   ; src
+	move.l	screen2_ptr,$ffff8a32.w   ; dest
 	move.b	#%11000000,$ffff8a3c.w ; start HOG
 	nop
 	nop
@@ -503,7 +523,7 @@ video_end
 	movem.l	d0-d7,$ffff8240.w
 	;move.b	old_rez,$ffff8260.w
 	;move.b	old_hz,$ffff820a.w
-	move.l	old_screen,screen_display_ptr
+	move.l	old_screen,screen0_ptr
 	bsr	set_videoaddr
 
 	lea	old_ints,a0
@@ -521,6 +541,13 @@ video_end
 	move.b	(a0)+,$fffffa1b.w
 	move.b	(a0)+,$fffffa21.w
 	move.b	#$c0,$fffffa23.w	; fix key repeat
+
+	; at least reset VGA color #0 to white
+	lea	vgapal,a0
+	move.b	#$FF,(a0)+
+	move.b	#$FF,(a0)+
+	move.b	#$FF,(a0)
+	jsr	set_palette
 
 	move.w	#$2300,sr
 
@@ -649,7 +676,7 @@ timer_a	move.b	#1,$fffffa1f.w
 	add.w	#1,aplay_frm
 
 	; empty graphics, skip render
-	addq	#2,a1  ; 0 = audio only
+	;addq	#2,a1  ; 0 = audio only
 
 	IFNE	loop_play	
 	; clear the idx playlist in case the video loops and inc idx_play+4
@@ -746,11 +773,24 @@ set_screen
 	;move.b	screen_display_ptr+3,$ffff820d.w
 .end	rts
 
+
+	; a0=palette source
+copy_palette
+	lea	vgapal,a1
+	move.w	#239,d0
+.loop	move.b	(a0)+,(a1)+
+	move.b	(a0)+,(a1)+
+	move.b	(a0),(a1)
+	addq	#2,a0
+	addq	#2,a1
+	dbra	d0,.loop
+	rts
+
 ; 18-bits palette so each component must be >>2	
 set_palette	
 	move.b	#$FF,DAC_PEL ; pixel mask
 	move.w	#255,d0
-	lea	palette(pc),a0
+	lea	vgapal,a0
 	move.b	#0,DAC_IW	; start pal index #0
 .pal	move.b	(a0)+,d1
 	move.b	(a0)+,d2
@@ -775,11 +815,11 @@ vsync	btst	#3,INSTATUS1
 	; set screen base address
 set_videoaddr
 	move.b	#LStartL,CRTC_I
-	move.b	screen_display_ptr+3,CRTC_D
+	move.b	screen0_ptr+3,CRTC_D
 	move.b	#LStartM,CRTC_I
-	move.b	screen_display_ptr+2,CRTC_D
+	move.b	screen0_ptr+2,CRTC_D
 	move.b	#LStartH,CRTC_I
-	move.b	screen_display_ptr+1,CRTC_D
+	move.b	screen0_ptr+1,CRTC_D
 	rts
 	
 *** SCROLLTEXT
@@ -799,7 +839,7 @@ scrolltext
 	move.w	#-1,$ffff8a2c.w ; endmask3
 	move.w	#$0203,$ffff8a3a.w    ; HOP+OP: $010F=1fill/$0203=copy
 	
-	move.l	screen_render_ptr,a6
+	move.l	screen0_ptr,a6
 	add.l	#(240-25)*640,a6	; screen bottom
 	move.l	textptr,a5
 	lea	fontidx,a4
@@ -814,7 +854,11 @@ scrolltext
 	; first char
 	moveq	#0,d0
 	move.b	(a5)+,d0
-	sub.w	#' ',d0
+	cmp.b	#'#',d0
+	bne.s	.ok1
+	addq	#1,a5
+	move.b	(a5)+,d0
+.ok1	sub.w	#' ',d0
 	lsl.w	#2,d0
 	move.l	(a4,d0.w),a0	; char ptr	
 	add.w	d6,a0	; add text shift
@@ -845,7 +889,11 @@ scrolltext
 .middle	
 .loopchar	moveq	#0,d0
 	move.b	(a5)+,d0
-	sub.w	#' ',d0
+	cmp.b	#'#',d0
+	bne.s	.ok2
+	addq	#1,a5
+	move.b	(a5)+,d0
+.ok2	sub.w	#' ',d0
 	lsl.w	#2,d0
 	move.l	(a4,d0.w),a0	; char ptr
 
@@ -869,7 +917,11 @@ scrolltext
 	; last char (if needed)
 	moveq	#0,d0
 	move.b	(a5)+,d0
-	sub.w	#' ',d0
+	cmp.b	#'#',d0
+	bne.s	.ok3
+	addq	#1,a5
+	move.b	(a5)+,d0
+.ok3	sub.w	#' ',d0
 	lsl.w	#2,d0
 	move.l	(a4,d0.w),a0	; char ptr	
 
@@ -896,13 +948,27 @@ scrolltext
 	nop
 
 .shifttext	
-	tst.b	(a5)
+	move.b	(a5)+,d0
+	cmp.b	#'#',d0
+	bne.s	.nocmd
+	; speed command A>M (2>26)
+	move.b	(a5)+,d0
+	sub.b	#'A'-1,d0
+	lsl.b	#1,d0
+	move.b	d0,textspeed+1	; change speed
+	move.b	(a5)+,d0	
+.nocmd	tst.b	d0
 	beq.s	.wrap
-	addq	#6,d6	; scroll speed (must be even and <=26)
+	add.w	textspeed,d6	; scroll speed (must be even and <=26)
 	cmp.w	#26,d6
 	blt.s	.noinc
 	sub.w	#26,d6
 	add.l	#1,textptr
+	move.l	textptr,a5
+	move.b	(a5),d0
+	cmp.b	#'#',d0
+	bne.s	.noinc
+	add.l	#2,textptr
 	bra.s	.noinc
 .wrap	move.l	#text,textptr
 	moveq	#0,d6
@@ -1028,10 +1094,12 @@ b_first_refresh
 	dc.w	-1
 b_fileerror
 	dc.w	0
-screen_render_ptr
+screen0_ptr
 	dc.l	SCREEN
-screen_display_ptr 
+screen1_ptr 
 	dc.l	SCREEN+(640*240)
+screen2_ptr
+	dc.l	SCREEN+(640*480)
 screen_debug_ptr
 	dc.l	buf_nothing_end
 file_handle
@@ -1086,12 +1154,16 @@ s_errfile
 	dc.b	"File error",10,13,0
 
 text	dc.b	"             "
-	dc.b	"LALALALA DOES IT WORK AND THIS FONT DOES NOT HAVE ANY KIND OF QUESTION MARK I'M SO DISAPPOINTED"
-	dc.b	"             "
+	dc.b	"LALALALA DOES IT WORK AND THIS FONT"
+	dc.b	"#A DOES NOT HAVE ANY KIND OF QUESTION#B MARK I'M SO DISAPPOINTED"
+	dc.b	" BUT AT LEAST I#JCAN CHANGE SPEED OF THIS SCROLLER AND MAKE"
+	dc.b	" IT VERY FAST"
+	dc.b	"             #B"
 	dc.b	0
 	even
 textptr	dc.l	text
 textshift	dc.w	0
+textspeed	dc.w	2
 
 	even
 
@@ -1105,16 +1177,23 @@ SmallTab	dc.b	0,38,0,48,0,0,0,42,43,44,0,46,41,45,47,0
 	dc.b	28,29,30,31,32,33,34,35,36,37,38,39,40,41
 
 	even
-image	incbin	"backgr.bmp"
-palette	EQU	image+$36
-bmpdata	EQU	image+$3FB
-
+back0	incbin	"back0.bmp"
+pal0	EQU	back0+$36
+image0	EQU	back0+1014 ;$3FB
+	even
+back1	incbin	"back1.bmp"
+pal1	EQU	back1+$36
+image1	EQU	back1+1014 ;$3FB
+	even
+back2	incbin	"back2.bmp"
+pal2	EQU	back2+$36
+image2	EQU	back2+1014 ;$3FB	even
 	even
 fontimg	incbin	"carebear.bmp"
 fontpal	EQU	fontimg+$36
 fontidx	
 Xchar	SET	0
-	REPT	56
+	REPT	59
 	dc.l	fontimg+1070+Xchar
 Xchar	SET	Xchar+26
 	ENDR
@@ -1126,12 +1205,12 @@ Save_Mfp	ds.l	16
 Save_Vec	ds.l	17
 old_screen
 	ds.l	1
-old_ints	ds.b	25
+old_ints	ds.b	26
 old_palette
 	ds.w	16
-	even
 vid_index	ds.w	nb_frames+1
 play_index	ds.l	nb_frames+1
+vgapal	ds.l	256
 buf_nothing
 	ds.w	40
 buf_nothing_end
