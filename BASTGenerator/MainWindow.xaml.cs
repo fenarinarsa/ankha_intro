@@ -51,14 +51,14 @@ namespace BASTGenerator
         double target_fps = vga_fps/2; // should be >= fps
 
         int first_pic = 0;
-        int last_pic = 4662;
+        int last_pic = 4662/2;
 
 
         // audio
         int original_samplesize = 2;   // original should always be 16 bits PCM
         int ste_channels = 2;          // 1=mono, 2=stereo (also applies to the input wav file)
-        int soundfrq = 25033;       // audio frequency (+/-1Hz depending on the STE main clock). divide by 2 for 25kHz, 4 for 12kHz, etc.
-        String soundfile = @"D:\ankha\scratch_25k_16b.wav"; // Original sound file (PCM 16 bit little endian without any tag)
+        int soundfrq = 50066;       // audio frequency (+/-1Hz depending on the STE main clock). divide by 2 for 25kHz, 4 for 12kHz, etc.
+        String soundfile = @"D:\ankha\scratch_50k_16b.wav"; // Original sound file (PCM 16 bit little endian without any tag)
 
         String runtimesoundfile = @"D:\ankha\ankham_run\ankha_{0:00000}.pcm";
 
