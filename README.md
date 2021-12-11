@@ -1,19 +1,17 @@
-# Bad Apple!!
+# Ankha Intro
 
-Bad Apple!! for Atari STE
+Ankha Intro for Atari Mega STE and ET4000 VGA card
 
-The infamous video for your STE.
 
-**music:** Masayoshi Minoshima (Alstroemeria Records)  
-**vocals** nomico  
-**original video** Anira  
+**music:** dDamage  
+**graphics** Zone (zone-archive.com)  
 **code:** Fenarinarsa  
 
 **Binaries & videos**  
-https://demozoo.org/productions/180988/
+https://demozoo.org/productions/303160/  
 
 **Web**  
-https://fenarinarsa.com  
+https://fenarinarsa.com/ankha-intro  
 
 **Twitter**  
 https://twitter.com/fenarinarsa  
@@ -24,20 +22,19 @@ https://shelter.moe/@fenarinarsa
 
 # Requirements
 
-Atari STE or Mega STE with at least 1MB RAM  
-Color or monochrome monitor  
+Atari Mega STE with at least 2MB RAM  
+ET4000 VGA card (tested with NOVA ET4000/AX)  
+320x240x256 VGA mode  
 ACSI or IDE Hard Drive
 
 
 # Contents
 
 - asm  
-Contains the player in 68000 assembler code for Atari STE.
+Contains the 68000 source code for the Atari intro.
 
 - BASTGenerator  
-Data files generator in C#. To regenerate the files you'll also need the audio/video assets available here:  
-https://fenarinarsa.com/badapple/fenarinarsa_badapple_source.zip  
-...and Visual Studio (any edition).
+Data files generator in C#. To regenerate the audio file.
 
 
 # Build instructions
@@ -67,24 +64,14 @@ Then open a shell as administrator and type:
 To build ba.tos, open a shell, go to the "asm" folder and type:  
 `make`
 
-You will get a ba.tos that works with the 50kHz color version.
+You will get a ankha_in.tos.
 
-The data files can be found in the final release:  
-https://fenarinarsa.com/badapple/fenarinarsa_badapple_final.zip
+## Known issues
 
-## Options
+The intro was only tested on Mega STE 4MB with ET4000/AX with ICS 5301-2 DAC.
 
-### Alternate versions
+There is audio cracks in the party version. I'm working on rewriting the audio engine to make it simpler and more efficient. (currently it's based on the Bad Apple!! player which is overkill).
 
-Don't forget to use the correct data files (they're all provided in the release archive):
-- You can switch to monochrome by setting ```monochrome EQU 1``` at the start of the source code.  
-- The DMA sound frequency can be easily changed (look for ```move.b #%11,$FFFF8921.w```). 
+The NOVA screen saver will fire after a few minutes, because the system Timer C is still active during the demo.  
 
-### STF/TT030/Falcon ports
-
-It's worth noting that you can disable the blitter use in BASTGenerator by setting all three ```opt_blitter``` options to ```false``` in ```bw_MakeRun()```. The generated data file will only contain software code for delta-packing without any need to change the player. By using only 8 greyshades and adding a software YM2149 sample replay, an STF version should be possible.  
-
-The Blitter emulation provided in the source code should work on 68030 (untested). However the "stack trick" used between interrupts is not compatible with the 68030, to my knowledge.
-
-A Falcon version could also be done by removing all audio data and using an MP2 player. However the 4/3 resolutions are different in VGA and RGB, and the Videl chip needs to be setup accordingly to work in 60Hz.
-
+You can make it compatible with 640x480 by changing the "linewidth" value to 640 (at the start of source code).
