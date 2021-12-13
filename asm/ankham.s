@@ -142,30 +142,6 @@ vga_debug	MACRO
 	trap	#1
 	addq.w	#6,sp
 
-
-	*** get the biggest available block in memory for the file buffer
-;	move.l	#-1,-(sp)
-;	move.w	#$48,-(sp)		; malloc
-;	trap	#1
-;	addq.l	#6,sp
-;	cmp.l	#500*1024,d0	; needs at least 500MB of free RAM
-;	blt	buyram		; stop if not enough memory
-;	IFNE	ram_limit
-;	move.l	#ram_limit,d0	; limit used RAM (debug)
-;	ENDC
-;	move.l	d0,vid_buffer_end
-;	move.l	d0,-(sp)
-;	move.w	#$48,-(sp)		; malloc
-;	trap	#1
-;	addq.l	#6,sp
-;	tst.l	d0
-;	ble	end		; error while doing malloc
-;	move.l	d0,vid_buffer
-;	add.l	d0,vid_buffer_end
-;	move.l	d0,play_ptr
-;	move.l	d0,aplay_ptr
-;	addq	#2,d0
-;	move.l	d0,load_ptr	; add 2 to load_ptr because it must be >play_ptr, else it means the buffer is full
 	
 	*** Open audio pcm file
 	move.w	#0,-(sp)		; open video
@@ -174,14 +150,13 @@ vga_debug	MACRO
 	trap	#1
 	addq.l	#8,sp
 	tst.w	d0
-	ble	file_error		; video not found
+	ble	file_error		; file not found
 
 	move.w	d0,file_handle
 
 	move.w	#2,-(sp)		; physaddr
 	trap	#14
 	move.l	d0,old_screen
-
 
 
 *** Hardware inits
@@ -244,8 +219,9 @@ hwinits
 	DMASNDST
 	move.l 	#buf_nothing_end,d0
 	DMASNDED
-	move.b	#%11,$ffff8901.w	; start playing sound
+	move.b	#%11,$ffff8901.w	; start playing sound (on a short empty buffer)
 
+	; setup play buffers idx to negative => "stalled"
 	move.w	#$ff00,current_play_buffer
 	move.w	#$ff00,next_play_buffer
 
@@ -351,10 +327,10 @@ hwinits
 	; VGA is around 60.15Hz (40 858 MFP cycles)
 	; Timer B handler will then wait for vblank
 	sf	$fffffa1b.w	; stop TB
-;	move.l	#tb_render,$120.w
-;	bsr	vsync
-;	move.b	#198,$fffffa21.w	; counter=200
-;	move.b	#7,$fffffa1b.w	; divider=200
+	move.l	#tb_render,$120.w
+	bsr	vsync
+	move.b	#198,$fffffa21.w	; counter=200
+	move.b	#7,$fffffa1b.w	; divider=200
 
 	ENDC
 
@@ -414,7 +390,7 @@ check_buffer
 	add.l	#12,sp
 
 	tst.l	d0
-	blt	video_end		; stop if file error
+	blt	demo_end		; stop if file error
 
 	cmp.l	#BUFFERSIZE,d0
 	beq	.loaded
@@ -442,7 +418,7 @@ check_buffer
 	add.l	#12,sp
 
 	cmp.l	d1,d0
-	bne	video_end		; stop if file error
+	bne	demo_end		; stop if file error
 
 .loaded	clr.w	b_loading
 	move.b	#1,(a5,d6.w)	; set buffer as loaded
@@ -452,28 +428,16 @@ check_buffer
 
 
 
-check_ikbd	cmp.b	#$1+$80,$fffffc02.w	; ESC depressed
-	bne	.no_esc
-	addq	#4,sp
-	bra	video_end
-.no_esc	clr.w	debug_color
-;	cmp.b	#$4e+$80,$fffffc02.w  ; + depressed
-;	bne.s	.noplus
-;	move.w	#-1,debug_info
-;	bsr	.endcheck
-;.noplus	cmp.b	#$4a+$80,$fffffc02.w  ; - depressed
-;	bne.s	.nominus
-;	clr.w	debug_info
-;	bsr	.endcheck
-.nominus	cmp.b	#$2a,$fffffc02.w	; Left-shift pressed
-	bne.s	.endcheck
-	move.w	#-1,debug_color
-.endcheck	rts
+check_ikbd	
+	cmp.b	#$1+$80,$fffffc02.w	; ESC depressed
+	beq	.esc
+	rts
+.esc	addq	#4,sp
+	; drop to demo_end
 
-	
 *** END
 
-video_end	
+demo_end	
 	*** Close audio file
 	move.w	file_handle,-(sp)
 	move.w	#$3e,-(sp)
@@ -530,7 +494,7 @@ video_end
 	jsr	flush
 
 	clr.l	-(sp)
-	move.w	#$20,-(sp)		; super
+	move.w	#$20,-(sp)	; super
 	trap	#1
 	addq.w	#6,sp
 
@@ -542,64 +506,9 @@ end	; PTERM
 *** GRAPHIC AND SOUND RENDER
 * Audio is played from loaded raw data
 * Frame is rendered by running the generated code + blitter data loaded from file
-* VBL only prints debug data
+* VBL does nothing (may print debug data if needed)
 
-vbl	;addq.w	#1,vbl_count
-	;rte
-	
-vbl_debug	move.w	$ffff8240.w,-(sp)
-	color_debug $555
-
-	movem.l	d0-a6,-(sp)
-
-
-	bsr	.print_debug
-
-	movem.l	(sp)+,d0-a6
-	move.w	(sp)+,$ffff8240.w
-	rte
-
-.print_debug
-	; print debug info
-	move.l	screen_debug_ptr,a1
-
-	; "LOAD"
-	lea	s_nothing,a0
-	tst.w	b_loading
-	beq.s	.printload
-	lea	s_debug_load,a0
-.printload	moveq	#-1,d6
-	bsr	textprint
-
-	; "PLAY"
-	lea	s_nothing,a0
-	tst.w	b_buffering_lock
-	bne.s	.printplay
-	lea	s_debug_play,a0
-.printplay	moveq	#-1,d6
-	bsr	textprint
-
-	; load ptr
-	lea	s_hex,a6
-	move.l	a6,a0
-	move.l	audio_buffer_status,d0
-	bsr	itoahex
-	move.l	a6,a0
-	addq.l	#2,a0
-	moveq	#3,d6
-	bsr	textprint
-
-	; play ptr
-	lea	s_hex,a6
-	move.l	a6,a0
-;	move.l	play_ptr,d0
-	bsr	itoahex
-	move.l	a6,a0
-	addq.l	#2,a0
-	moveq	#7,d6
-;	bsr	textprint
-	rts
-	
+vbl	rte
 
 * Timer A
 
@@ -728,53 +637,19 @@ hbl	move.w	$ffff8240.w,-(sp)
 	move.l	pal0,pal2
 	move.l	a0,pal0
 	
-	;jsr	set_videoaddr
-	;bsr	copy_palette
 	bsr	set_palette
 	move.w	#SWITCH_FRAMES,framecount
 
-.noswitch	tst.w	b_buffering_lock
-	bne	nohblrender
-
-	bsr	scrolltext
-
-	;add.w	#1,rendered_frame 	; for debug purpose only
-
-	; check if unchanged frame
-	; apply to frame N-2 so we need to save this
-;	tst.w	swap_buffers
-;	beq	nohblrender
-
-	; swap video buffers
-	; so next vbl we're gonna see the frame rendered 2 vbls ago
-	;move.l	screen_render_ptr,a0
-	;move.l	screen_display_ptr,screen_render_ptr
-	;move.l	a0,screen_display_ptr
+.noswitch	bsr	scrolltext
 
 nohblrender
-	bsr	set_screen
 	movem.l	(sp)+,d0-a6
 	
 	clr.w	b_lock_render
 endhbl	move.w	(sp)+,$ffff8240.w
 	vga_debug $00,00,$ff
-	;and.w	#$f0ff,(sp)
-	;or.w	#$0300,(sp)	; disable HBL after rte (should not work on 68030+)
-	move.w	#$2300,sr
+	move.w	#$2300,sr		; disable HBL (68020+ compatible?)
 	rtr
-
-set_screen
-	tst.w	debug_info
-	;beq.s	.noshift
-	;move.b	screen_debug_ptr+1,$ffff8201.w
-	;move.b	screen_debug_ptr+2,$ffff8203.w
-	;move.b	screen_debug_ptr+3,$ffff820d.w
-	;bra.s	.end
-.noshift	;move.b	screen_display_ptr+1,$ffff8201.w
-	;move.b	screen_display_ptr+2,$ffff8203.w
-	;move.b	screen_display_ptr+3,$ffff820d.w
-.end	rts
-
 
 	; a0=palette source
 	; a1=dest
@@ -1021,89 +896,12 @@ error_message
 
 	jmp	end
 
-
-*** STRING FUNCTIONS
-
-	; a0 text to print
-	; a1 destination address on screen
-	; d6 max text length - 1
-
-textprint_end
-	rts
-
-textprint	lea	smallfont(pc),a2
-	lea	SmallTab(pc),a5
-	;moveq	#3,d1		; nb bitplanes
-.startline	move.l	a1,a6
-
-.loop	moveq	#0,d2
-	move.b	(a0)+,d2	; char
-	beq	textprint_end
-	cmp.b	#13,d2	; CR
-	bne.s	.nocr
-	
-	; CR
-	move.l	a6,a1
-	add.w	#line_length*9,a1
-	bra.s	.startline
-
-.nocr	sub.b	#32,d2	; ASCII-32
-	move.b	(a5,d2.w),d2	; offset to char
-	lsl.w	#3,d2	; size of char = 8 bytes
-	lea	(a2,d2.w),a3	; source
-
-.print
-	move.b	(a3)+,(a1)
-	move.b	(a3)+,line_length(a1)
-	move.b	(a3)+,line_length*2(a1)
-	move.b	(a3)+,line_length*3(a1)
-	move.b	(a3)+,line_length*4(a1)
-	move.b	(a3)+,line_length*5(a1)
-	move.b	(a3)+,line_length*6(a1)
-	move.b	(a3),line_length*7(a1)
-	addq	#8,a1
-
-	IFEQ	monochrome
-	move.l	a1,d5
-	btst	#0,d5
-	bne.s	.odd
-	ENDC
-	subq	#7,a1
-	dbra	d6,.loop
-	rts
-.odd	subq	#1,a1
-	dbra	d6,.loop
-	rts
-	
-
-	; d0 value to convert
-	; a0 textbuffer (8 bytes)
-itoahex	lea	hexstr,a2
-	lea	8(a0),a0
-	moveq	#7,d3
-	move.w	#$F,d2
-.loop	move.w	d0,d1
-	and.w	d2,d1
-	move.b	(a2,d1.w),-(a0)
-	lsr.l	#4,d0
-	dbra	d3,.loop
-	rts
-
-
-hexstr	dc.b	'0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F'
-	even
-
-
 	section	data
 
 	even
 
 vbl_count	dc.w	0
 b_loading	dc.w	0
-b_buffering_lock
-	dc.w	-1
-;b_first_refresh
-;	dc.w	-1
 b_fileerror
 	dc.w	0
 screen0_ptr
@@ -1139,25 +937,6 @@ next_play_buffer
 next_load_buffer
 	dc.w	0
 
-;idx_play	dc.l	play_index		; ptr to next frame to play
-;idx_load	dc.l	vid_index		; ptr to frame size 16bits list
-;idx_loaded	dc.l	play_index		; ptr to next frame to load
-;load_ptr	dc.l	0	; start at vid_buffer
-;play_ptr	dc.l	0	; video frame ptr
-;	dc.w	0	; 32b align
-;play_frm	dc.w	0	; video frame number
-;aplay_ptr	dc.l	0	; audio frame ptr
-;	dc.w	0	; 32b align
-;aplay_frm	dc.w	0	; audio frame number
-;play_offset
-;	dc.l	0
-;load_offset
-;	dc.l	0
-;size_toload
-;	dc.l	0
-;vid_buffer	dc.l	0
-;vid_buffer_end
-	dc.l	0
 framecount
 	dc.w	SWITCH_FRAMES+322
 swap_buffers
@@ -1166,14 +945,6 @@ swap_buffers
 
 s_vid_filename
 	dc.b	"AUDIO.DAT",0
-s_debug_load
-	dc.b	"LOAD ",0
-s_debug_play
-	dc.b	"PLAY ",0
-s_hex	dc.b	"         ",0
-s_nothing	dc.b	"     ",0
-
-
 
 s_errmemory
 	dc.b	"Not enough memory available T_T",10,13,10,13,"Please buy some RAM and try again.",10,13,0
@@ -1203,15 +974,6 @@ textshift	dc.w	0
 textspeed	dc.w	4
 
 	even
-
-smallfont	dc.b	0,0,0,0,0,0,0,0
-	incbin	"SMALL"
-	dc.b	$ff,$ff,$ff,$ff,$ff,$ff,$ff,0
-SmallTab	dc.b	0,38,0,48,0,0,0,42,43,44,0,46,41,45,47,0
-	dc.b	1,2,3,4,5,6,7,8,9,10
-	dc.b	39,40,0,0,0,37,0
-	dc.b	11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27
-	dc.b	28,29,30,31,32,33,34,35,36,37,38,39,40,41
 
 	even
 back0	incbin	"back0.bmp"
@@ -1245,16 +1007,12 @@ old_screen
 old_ints	ds.b	26
 old_palette
 	ds.w	16
-;vid_index	ds.w	nb_frames+1
-;play_index	ds.l	nb_frames+1
 vgapal0	ds.l	256
 vgapal1	ds.l	256
 vgapal2	ds.l	256
 buf_nothing
 	ds.w	40
 buf_nothing_end
-
-
 
 audio_buffers
 	ds.l	BUFFERSIZE
