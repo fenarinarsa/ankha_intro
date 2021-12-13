@@ -9,3 +9,4 @@ bin
 *.lref
 obj
 Debug
+asm/ANKHA_IN.PRG

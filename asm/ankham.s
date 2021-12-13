@@ -46,7 +46,7 @@ LStartH	EQU	$33
 LStartM	EQU	$C
 LStartL	EQU	$D
 
-emu	EQU	0	; 1=emulate HDD access timings by adding NOPs
+emu	EQU	1	; 1=emulate HDD access timings by adding NOPs
 ram_limit	EQU	1024*1024	; 0=no limit, other=malloc size
 blitter	EQU	1	; 1=use blitter 0=emulate blitter (not complete, for debug purpose only)
 minimum_load EQU	128*1000	; minimum size of a disk read (to optimize FREADs)
@@ -56,16 +56,20 @@ monochrome EQU 0
 line_length EQU 	160
 horz_shift	 EQU	1
 intro_shift EQU	0
-nb_frames	EQU	2332	; number of frames in file
-loop_frame EQU	111
+;nb_frames	EQU	2332	; number of frames in file
+;loop_frame EQU	111
 
 linewidth	EQU	320	; 640 for 640x480 and 320 for 320x240
 vidwidth	EQU	linewidth/4
 
 SWITCH_FRAMES EQU	880	; nb of frames between pictures swap 
+BUFFERSIZE EQU	100000	; nb of bytes for each audio buffer, there is 4 audio buffers (must be even for stereo)
+LOOPOFFSET EQU	0	; loop point in PCM file (must be even for stereo)
+
+VGA_ENABLE EQU	0
 
 DMASNDST	MACRO
-	move.l	\1,d0
+	;move.l	\1,d0
 	swap	d0
 	move.b	d0,$ffff8903.w
 	swap	d0
@@ -76,7 +80,7 @@ DMASNDST	MACRO
 	ENDM
 
 DMASNDED	MACRO
-	move.l	\1,d0
+	;move.l	\1,d0
 	swap	d0
 	move.b	d0,$ffff890F.w
 	swap	d0
@@ -99,21 +103,20 @@ emu_hdd_lag MACRO
 
 color_debug MACRO
 	
-	tst.w	debug_color
-	beq.s	.\@
-	IFEQ	monochrome
+;	tst.w	debug_color
+;	beq.s	.\@
 	move.w	#\1,$ffff8240.w
-	ELSE
-	not.w	$ffff8240.w
-	ENDC
 .\@
 	ENDM
 	
 vga_debug	MACRO
-	;move.b	#0,DAC_IW
-	;move.b	#\1,DAC_D	; write R
-	;move.b	#\2,DAC_D	; write G
-	;move.b	#\3,DAC_D	; write B
+	IFNE VGA_ENABLE
+	;move.b	#$FF,DAC_PEL ; pixel mask
+	move.b	#0,DAC_IW
+	move.b	#\1,DAC_D	; write R
+	move.b	#\2,DAC_D	; write G
+	move.b	#\3,DAC_D	; write B
+	ENDC
 	ENDM
 
 	*** Mshrink
@@ -139,57 +142,32 @@ vga_debug	MACRO
 	trap	#1
 	addq.w	#6,sp
 
+
 	*** get the biggest available block in memory for the file buffer
-	move.l	#-1,-(sp)
-	move.w	#$48,-(sp)		; malloc
-	trap	#1
-	addq.l	#6,sp
-	cmp.l	#500*1024,d0	; needs at least 500MB of free RAM
-	blt	buyram		; stop if not enough memory
-	IFNE	ram_limit
-	move.l	#ram_limit,d0	; limit used RAM (debug)
-	ENDC
-	move.l	d0,vid_buffer_end
-	move.l	d0,-(sp)
-	move.w	#$48,-(sp)		; malloc
-	trap	#1
-	addq.l	#6,sp
-	tst.l	d0
-	ble	end		; error while doing malloc
-	move.l	d0,vid_buffer
-	add.l	d0,vid_buffer_end
-	move.l	d0,play_ptr
-	move.l	d0,aplay_ptr
-	addq	#2,d0
-	move.l	d0,load_ptr	; add 2 to load_ptr because it must be >play_ptr, else it means the buffer is full
-
-	*** Open index file
-	move.w	#0,-(sp)		; open index
-	pea	s_idx_filename
-	move.w	#$3D,-(sp)
-	trap	#1
-	addq.l	#8,sp
-	tst.w	d0
-	ble	file_error	; index not found
-
-	move.w	d0,file_handle
-
-	*** Read index
-	pea	vid_index
-	move.l	#(nb_frames*2),-(sp)		; read index
-	move.w	file_handle,-(sp)
-	move.w	#$3F,-(sp)
-	trap	#1
-	add.l	#12,sp
-	cmp.w	#4,d0		; error file too short
-	ble	file_error
-
-	*** Close index file
-	move.w	file_handle,-(sp)	; close index
-	move.w	#$3e,-(sp)		
-	addq.l	#4,sp
+;	move.l	#-1,-(sp)
+;	move.w	#$48,-(sp)		; malloc
+;	trap	#1
+;	addq.l	#6,sp
+;	cmp.l	#500*1024,d0	; needs at least 500MB of free RAM
+;	blt	buyram		; stop if not enough memory
+;	IFNE	ram_limit
+;	move.l	#ram_limit,d0	; limit used RAM (debug)
+;	ENDC
+;	move.l	d0,vid_buffer_end
+;	move.l	d0,-(sp)
+;	move.w	#$48,-(sp)		; malloc
+;	trap	#1
+;	addq.l	#6,sp
+;	tst.l	d0
+;	ble	end		; error while doing malloc
+;	move.l	d0,vid_buffer
+;	add.l	d0,vid_buffer_end
+;	move.l	d0,play_ptr
+;	move.l	d0,aplay_ptr
+;	addq	#2,d0
+;	move.l	d0,load_ptr	; add 2 to load_ptr because it must be >play_ptr, else it means the buffer is full
 	
-	*** Open runtime file
+	*** Open audio pcm file
 	move.w	#0,-(sp)		; open video
 	pea	s_vid_filename
 	move.w	#$3D,-(sp)
@@ -248,11 +226,11 @@ hwinits
 
 	; Timer C should not be stopped because it's used by some HDD drivers
 	move.b	#%00100001,$fffffa07.w	; timer a/b only
-	and.b	#%11100000,$fffffa09.w	; all but timer C / ACIA / HDC controller
-	or.b	#%01000000,$fffffa09.w	; enable ACIA
+	and.b	#%00000000,$fffffa09.w	; nothing --all but timer C / ACIA / HDC controller
+	or.b	#%00000000,$fffffa09.w	; nothing --enable ACIA
 	move.b	#%00100001,$fffffa13.w	; timer a/b only
-	and.b	#%11100000,$fffffa15.w	; all but timer C & ACIA / HDC controller
-	or.b	#%01000000,$fffffa15.w	; enable ACIA
+	and.b	#%00000000,$fffffa15.w	; nothing --all but timer C / ACIA / HDC controller
+	or.b	#%00000000,$fffffa15.w	; nothing --enable ACIA
 	bclr	#3,$fffffa17.w	; AEI
 
 	; find the ST video address for debug purpose
@@ -262,16 +240,17 @@ hwinits
 
 	move.b     #%11,$FFFF8921.w	; 50kHz stereo
 	;move.b     #%10000001,$FFFF8921.w	; 12kHz mono
-	lea	buf_nothing,a0
-	DMASNDST	a0
-	lea 	buf_nothing_end,a0
-	DMASNDED	a0
+	move.l	#buf_nothing,d0
+	DMASNDST
+	move.l 	#buf_nothing_end,d0
+	DMASNDED
 	move.b	#%11,$ffff8901.w	; start playing sound
 
-	; enable Timer A
-	move.l	#timer_a,$134.w
-	move.b	#1,$fffffa1f.w
-	move.b	#8,$fffffa19.w
+	move.w	#$ff00,current_play_buffer
+	move.w	#$ff00,next_play_buffer
+
+
+	IFNE	VGA_ENABLE
 
 	; prepare all palettes
 	move.l	pal0,a0
@@ -319,7 +298,7 @@ hwinits
 	move.w	#2,$ffff8a20.w   ; src x byte increment
 	move.w	#2,$ffff8a22.w   ; src y byte increment
 	move.w	#2,$ffff8a2e.w ; dst x increment
-	move.w     #2+(linewidth-320),$ffff8a30.w ; dst y increment
+	move.w	#2+(linewidth-320),$ffff8a30.w ; dst y increment
 	clr.b	$ffff8a3d.w    ; skew
 	move.w	#-1,$ffff8a28.w ; endmask1
 	move.w	#-1,$ffff8a2a.w ; endmask2
@@ -357,132 +336,120 @@ hwinits
 	nop
 	nop
 	
-	; shift the font colors by 240
+	; shift the font colors by 240 except for color #0 (for debug)
 	move.l	fontidx,a0
-	move.w	#(25*1534)/2-1,d0
-ftloop	add.w	#$F0F0,(a0)+
-	dbra	d0,ftloop
+	move.w	#24,d1
+.ftloopY	move.w	#1533,d0
+.ftloopX	tst.b	(a0)+
+	beq.s	.bg
+	add.b	#$F0,-1(a0)
+.bg	dbra	d0,.ftloopX
+	dbra	d1,.ftloopY
 
 	; detect VGA Vsync
 	; and setup Timer B faster than 60Hz (40000 MFP cycles)
 	; VGA is around 60.15Hz (40 858 MFP cycles)
 	; Timer B handler will then wait for vblank
 	sf	$fffffa1b.w	; stop TB
-	move.l	#tb_render,$120.w
-	bsr	vsync
-	move.b	#203,$fffffa21.w	; counter=200
-	move.b	#7,$fffffa1b.w	; divider=200
+;	move.l	#tb_render,$120.w
+;	bsr	vsync
+;	move.b	#198,$fffffa21.w	; counter=200
+;	move.b	#7,$fffffa1b.w	; divider=200
+
+	ENDC
+
 	move.w	#$2300,sr
-
-
-
 
 *** MAIN LOOP
 * the main loop is where the loading takes place
 * with a FIFO (cyclic) buffer
-* meanwhile rendering takes place in the HBL interrupt
+* main rendering takes place in the HBL interrupt
 
-next_frame
-	; read next frame from file
-next_load	
-	move.l	idx_load,a0
-	tst.w	(a0)		; end of index
-	bne.s	find_load_size
 
-	IFEQ loop_play
-	; we're done loading, force play
-	move.l	#wait_for_play_end,-(sp)
-	bra	enableplay
-	ELSE
-	; end of video, looping
+	; first load
+	move.w	#-1,b_loading
+	move.l	a4,-(sp)
+	move.l	#BUFFERSIZE*4,-(sp)
+	move.w	file_handle,-(sp)
+	move.w	#$3F,-(sp)		; fread
+	;emu_hdd_lag
+	trap	#1
+	add.l	#12,sp
+	clr.w	b_loading
+	move.l	#$01010101,audio_buffer_status	; set all 4 buffers as loaded
 
-	; loop video
-	move.l	idx_loaded,a0	; set -1 at the end the loaded data ptr list
-	move.l	#-1,(a0)
-	move.l	#play_index,idx_loaded
-	move.l	#vid_index,a0
-	move.w	#loop_frame-1,d0
-	; add intro's frame sizes to get the loop frame offset in file
-	move.w	#0,a1
-.findloopindex
-	adda.w	(a0)+,a1
-	dbra	d0,.findloopindex
-	move.l	a0,idx_load
-	; seek to start of file
+	; enable Timer A
+	move.l	#timer_a,$134.w
+	move.b	#1,$fffffa1f.w
+	move.b	#8,$fffffa19.w
+
+	; look for the first empty buffer
+check_buffer
+	lea	audio_buffer_ptr,a6
+	lea	audio_buffer_status,a5
+	move.w	next_play_buffer,d6
+	moveq	#3,d7	
+.loop	addq	#1,d6
+	and.w	#%11,d6
+	tst.b	(a5,d6.w)
+	beq	.found
+	dbra	d7,.loop
+	bsr	check_ikbd
+	bra.s	check_buffer	; nothing found, check again
+
+.found	; free buffer found, we are going to load it
+
+	;color_debug $400	; faint red
+	move.w	d6,d5
+	lsl.w	#2,d5
+	move.l	(a6,d5.w),a4	; get buffer ptr
+
+	move.w	#-1,b_loading
+	move.l	a4,-(sp)
+	move.l	#BUFFERSIZE,-(sp)
+	move.w	file_handle,-(sp)
+	move.w	#$3F,-(sp)		; fread
+	;emu_hdd_lag
+	trap	#1
+	add.l	#12,sp
+
+	tst.l	d0
+	blt	video_end		; stop if file error
+
+	cmp.l	#BUFFERSIZE,d0
+	beq	.loaded
+
+	; partially loaded (end of file)
+
+	move.l	#BUFFERSIZE,d1
+	sub.l	d0,d1		; data remaining to load
+	add.l	d0,a4		; new ptr to load
+
+	; seek to loop point
 	clr.w	-(sp)
 	move.w	file_handle,-(sp)
-	move.l	a1,-(sp)		; seek offset
-	move.w	#66,-(sp)		; fseek
+	move.l	#LOOPOFFSET,-(sp)		; seek offset
+	move.w	#$42,-(sp)		; fseek
 	trap	#1
 	add.l	#10,sp
-	move.l	idx_load,a0
-	ENDC	
 
-find_load_size
-	moveq	#0,d5
-	moveq	#0,d6		; d6 = size to load
-	moveq	#-1,d7		; d7 = number of frames we are going to load
-.checksize	move.w	(a0)+,d5
-	beq	check_room		; nul => EOF
-	add.l	d5,d6
-	addq	#1,d7
-	cmp.l	#minimum_load,d6	; try not to load less than 512b (HDC DMA lower limit)
-	blt.s	.checksize
+	move.l	a4,-(sp)
+	move.l	d1,-(sp)
+	move.w	file_handle,-(sp)
+	move.w	#$3F,-(sp)		; fread
+	;emu_hdd_lag
+	trap	#1
+	add.l	#12,sp
 
-check_room	
+	cmp.l	d1,d0
+	bne	video_end		; stop if file error
+
+.loaded	clr.w	b_loading
+	move.b	#1,(a5,d6.w)	; set buffer as loaded
+	;color_debug $000	; black
 	bsr	check_ikbd
-	move.l	load_ptr,a0
-	move.l	play_ptr,a1
-	move.w	play_frm,d0
-	cmp.w	aplay_frm,d0	; if (play_frm < aplay_frm) => a1=play_ptr
-	blt.s	.oklimit
-	move.l	aplay_ptr,a2
-	cmp.l	#buf_nothing_end,a2
-	ble.s	.oklimit
-	move.l	a2,a1
-.oklimit	move.l	vid_buffer_end,a2	; a2=upper limit (default=end of filebuffer)
+	bra	check_buffer
 
-	move.l	a0,a3
-	add.l	d6,a3		; a3=end_load_ptr
-
-	cmp.l	a1,a0		; if (load_ptr <= play_ptr) => .upper_is_play
-	ble.s	.upper_is_play
-	cmp.l	a2,a3		; if (end_load_ptr <= vid_buffer_end) => loading
-	ble	loading
-
-	move.l	vid_buffer,a0	; load_ptr = start of vid buffer (looping memory)
-	move.l	a0,load_ptr	
-	move.l	a0,a3
-	add.l	d6,a3
-
-.upper_is_play
-	cmp.l	a1,a3		; if (end_load_ptr < play_ptr) => loading
-	blt	loading
-
-.bufferfull
-	; not enough room to load anything (buffer full)
-	tst.w	b_buffering_lock
-	beq.s	check_room		; we're not in buffering mode, recheck now
-
-	; exit buffering mode
-	move.l	#check_room,-(sp)	; for the upcoming rts
-	tst.w	b_first_refresh	; is it the first refresh ?
-	beq	enableplay
-	bsr	first_refresh
-
-enableplay
-	clr.w	b_buffering_lock	; enable play if previously disabled
-	move.b	#%11,$ffff8901.w	; restart sound
-	rts			; go to check_room or wait_for_play_end
-
-first_refresh
-	move.w	#-2,b_first_refresh	; not so bool after all
-.wait	cmp.w	#60,vbl_count	; wait at least 30 frames you damn emulator
-	blt.s	.wait
-	; clear screen
-	clr.w	b_first_refresh
-
-	rts
 
 
 check_ikbd	cmp.b	#$1+$80,$fffffc02.w	; ESC depressed
@@ -504,57 +471,6 @@ check_ikbd	cmp.b	#$1+$80,$fffffc02.w	; ESC depressed
 .endcheck	rts
 
 	
-
-loading	move.w	#-1,b_loading
-	move.l	load_ptr,-(sp)
-	move.l	d6,-(sp)
-	move.w	file_handle,-(sp)
-	move.w	#$3F,-(sp)		; fread
-	;color_debug $400	; faint red
-	emu_hdd_lag
-	trap	#1
-	;color_debug $000	; black
-	add.l	#12,sp
-	clr.w	b_loading
-
-	; filling idx_loaded with updated play pointers
-	; idx_load: 16 bits frame size list, from original ".idx" file
-	; load_ptr: ptr to the data that has just been loaded
-	; idx_loaded: 32 bits ptr list generated from idx_load and load_ptr
-	moveq	#0,d0
-	move.l	idx_loaded,a0
-	move.l	idx_load,a1
-	move.l	load_ptr,a2
-.idxloop	move.l	a2,(a0)+
-	move.w	(a1)+,d0
-	add.l	d0,a2
-	dbra	d7,.idxloop
-	move.l	a2,load_ptr
-	move.l	a1,idx_load
-	move.l	a0,idx_loaded
-
-	cmp.l	#buf_nothing,a0	; assert (idx_loaded) < buf_nothing
-	ble.s	.okaydebug
-	illegal
-.okaydebug
-
-	; purple
-	;move.w	#$707,d0
-	;moveq	#15,d1
-	;bsr	debug
-
-	bra	next_load
-
-	IFEQ	loop_play
-wait_for_play_end
-	move.l	idx_loaded,a0	; set -1 at the end the loaded data ptr list
-	move.l	#-1,(a0)
-.wait	bsr	check_ikbd
-	move.l	idx_play,a0	; if -1 we reached the end of the loaded frames
-	tst.l	(a0)
-	bge.s	.wait
-	ENDC
-
 *** END
 
 video_end	
@@ -572,13 +488,15 @@ video_end
 	sf	$fffffa1b.w	; stop timer B
 	move.l	#dummy_rte,$70.w	; temporary vbl
 	move.l	#dummy_rte,$68.w	; temporary hbl
-	move.w	#$2300,sr		; wait for vbl
+	;move.w	#$2300,sr		; wait for vbl
 	movem.l	old_palette,d0-d7
 	movem.l	d0-d7,$ffff8240.w
 	;move.b	old_rez,$ffff8260.w
 	;move.b	old_hz,$ffff820a.w
+	IFNE	VGA_ENABLE
 	move.l	old_screen,vid0_ptr
 	bsr	set_videoaddr
+	ENDC
 
 	lea	old_ints,a0
 	move.l	(a0)+,$68.w
@@ -596,12 +514,14 @@ video_end
 	move.b	(a0)+,$fffffa21.w
 	move.b	#$c0,$fffffa23.w	; fix key repeat
 
+	IFNE	VGA_ENABLE
 	; at least reset VGA color #0 to white
 	move.l	pal0,a0
 	move.b	#$FF,(a0)+
 	move.b	#$FF,(a0)+
 	move.b	#$FF,(a0)
 	bsr	set_palette
+	ENDC
 
 	move.w	#$2300,sr
 
@@ -625,7 +545,7 @@ end	; PTERM
 * VBL only prints debug data
 
 vbl	;addq.w	#1,vbl_count
-	rte
+	;rte
 	
 vbl_debug	move.w	$ffff8240.w,-(sp)
 	color_debug $555
@@ -662,90 +582,80 @@ vbl_debug	move.w	$ffff8240.w,-(sp)
 	; load ptr
 	lea	s_hex,a6
 	move.l	a6,a0
-	move.l	load_ptr,d0
+	move.l	audio_buffer_status,d0
 	bsr	itoahex
 	move.l	a6,a0
 	addq.l	#2,a0
-	moveq	#7,d6
+	moveq	#3,d6
 	bsr	textprint
 
 	; play ptr
 	lea	s_hex,a6
 	move.l	a6,a0
-	move.l	play_ptr,d0
+;	move.l	play_ptr,d0
 	bsr	itoahex
 	move.l	a6,a0
 	addq.l	#2,a0
 	moveq	#7,d6
-	bsr	textprint
+;	bsr	textprint
 	rts
 	
 
 * Timer A
 
 timer_a	move.b	#1,$fffffa1f.w
-	;color_debug $700
-	;vga_debug	$ff,$00,$00
+	color_debug $700
+	vga_debug	$ff,$00,$00
 
-	movem.l	d0-d1/a0-a1,-(sp)
+	movem.l	d0-d2/a0,-(sp)
 
-	tst.w	b_buffering_lock
-	bne	endrender
+	lea	audio_buffer_status,a0
+	move.w	current_play_buffer,d0
+	move.w	next_play_buffer,d1
+	tst.w	d0		; were we stalled?
+	blt.s	.stalled		; yes
+	; not stalled, updating current_play_buffer
+	clr.b	(a0,d0.w)		; clearing previous play buffer's status => "unloaded"
 
-	move.l	idx_play,a1	; current frame
-	move.l	(a1),d0
-	ble	enter_buffering	; null ptr = not loaded yet
+	; checking the next play buffer status
+	move.w	d1,current_play_buffer ; mandatory update: the previous "next_play_buffer" is now actually playing
+	addq	#1,d1
+	and.w	#%11,d1		; getting the next buffer index ((n+1) MOD 4)
+	bra.s	.checkbuffer
 
-	; set the new DMA audio buffer
-	; will be used when DMA loops automatically
-	; note that it would be ideally in 1 (mono) or 2 (color) vbls and then be in sync with the video
-	; there is many ways to achieve that but in this version it relies on the first audio frame
-	; to be smaller so the DMA loop happens just before this 'render' function is called
-	move.l	d0,a1
-	move.l	a1,play_ptr
-	add.w	#1,play_frm
-	move.l	d0,a0
-	move.l	(a0)+,d0		; pcm length
-	move.l	a0,a1
-	add.l	d0,a1		; pcm end
-	DMASNDED	a1
-	DMASNDST	a0
+.stalled	move.w	d1,current_play_buffer ; mandatory update: the previous "next_play_buffer" is now actually playing
+	and.w	#%11,d1		; retesting the next buffer index
 
-	;temporary hack to avoid emulation audio cracks
-	moveq	#0,d0
-	lea	$ffff8907.w,a0
-	movep.l	(a0),d0
-	and.l	#$00ffffff,d0
-	move.l	d0,aplay_ptr
-	add.w	#1,aplay_frm
+.checkbuffer
+	tst.b	(a0,d1.w)		; next buffer loaded?
+	beq.s	.notloaded	; stalled!
 
-	; empty graphics, skip render
-	;addq	#2,a1  ; 0 = audio only
+	; yes it's loaded, setting up the next buffer to play
+	move.w	d1,next_play_buffer
+	lsl.w	#2,d1
+	lea	audio_buffer_ptr,a0
+	move.l	(a0,d1.w),d0
+	move.l	d0,d2
+	add.l	#BUFFERSIZE,d0
+	DMASNDED
+	move.l	d2,d0
+	DMASNDST
 
-	IFNE	loop_play	
-	; clear the idx playlist in case the video loops and inc idx_play+4
-	move.l	idx_play,a0
-	move.l	a0,a1
-	addq	#4,a0
-	cmp.l	#-1,(a0)
-	bne	.noloop1
-	move.l	#play_index,a0
-.noloop1	move.l	a0,idx_play
-	clr.l	(a1)
-	ELSE
-	add.l	#4,idx_play
-	ENDC
-	bra.s	endrender
+.end_ta	movem.l	(sp)+,d0-d2/a0
+	color_debug $FFF
+	vga_debug $00,$00,$00
+	rte
 
-enter_buffering
-	move.b	#%00,$ffff8901.w	; stop sound
-	move.w	#-1,b_buffering_lock
+.notloaded
+	; the next buffer is not yet loaded. We load the dummy buffer and mark the play as stalled.
+	or.w	#$ff00,d1
+	move.b	d1,next_play_buffer
+	move.l	#buf_nothing_end,d0
+	DMASNDED
+	move.l	#buf_nothing,d0
+	DMASNDED
+	bra.s	.end_ta
 
-endrender	
-	movem.l	(sp)+,d0-d1/a0-a1
-	;color_debug $000
-	;vga_debug $00,$00,$00
-dummy_rte	rte
 
 * RENDER is triggered by Timer B
 * to be in sync with the card's vsync
@@ -754,7 +664,7 @@ dummy_rte	rte
 
 tb_render	sub.w	#1,framecount
 	addq	#1,vbl_count
-	;vga_debug	$00,$ff,$ff
+	vga_debug	$00,$ff,$ff
 
 	;bsr	set_videoaddr	; must be done BEFORE vsync
 
@@ -766,21 +676,23 @@ tb_render	sub.w	#1,framecount
 	beq.s	.waitvsync
 
 .invsync	sf	$fffffa1b.w	; stop TB
-	move.b	#203,$fffffa21.w	; counter=200
+	move.b	#198,$fffffa21.w	; counter=200
 	move.b	#7,$fffffa1b.w	; divider=200
-
+	;rte
 	tst.w	b_lock_render
 	bne.s	.locked		; don't enable HBL if a render is already in progress
 	and.w	#$f0ff,(sp)
 	or.w	#$0100,(sp)	; enable HBL after rte
-.locked	rte
+.locked
+	vga_debug	$00,$00,$00
+dummy_rte	rte
 
 b_lock_render
 	dc.w	0
 
 hbl	move.w	$ffff8240.w,-(sp)
 	; green
-	color_debug $070
+	;color_debug $070
 	vga_debug $00,$FF,$00
 
 	tst.w	b_lock_render
@@ -846,9 +758,10 @@ nohblrender
 	clr.w	b_lock_render
 endhbl	move.w	(sp)+,$ffff8240.w
 	vga_debug $00,00,$ff
-	and.w	#$f0ff,(sp)
-	or.w	#$0300,(sp)	; disable HBL after rte (should not work on 68030+)
-	rte
+	;and.w	#$f0ff,(sp)
+	;or.w	#$0300,(sp)	; disable HBL after rte (should not work on 68030+)
+	move.w	#$2300,sr
+	rtr
 
 set_screen
 	tst.w	debug_info
@@ -1189,8 +1102,8 @@ vbl_count	dc.w	0
 b_loading	dc.w	0
 b_buffering_lock
 	dc.w	-1
-b_first_refresh
-	dc.w	-1
+;b_first_refresh
+;	dc.w	-1
 b_fileerror
 	dc.w	0
 screen0_ptr
@@ -1212,25 +1125,38 @@ debug_color
 debug_info	dc.w	0
 
 
+audio_buffer_ptr
+	dc.l	audio_buffers
+	dc.l	audio_buffers+BUFFERSIZE
+	dc.l	audio_buffers+2*BUFFERSIZE
+	dc.l	audio_buffers+3*BUFFERSIZE
+audio_buffer_status
+	dc.b	0,0,0,0
+current_play_buffer
+	dc.w	-1
+next_play_buffer
+	dc.w	0
+next_load_buffer
+	dc.w	0
 
-idx_play	dc.l	play_index		; ptr to next frame to play
-idx_load	dc.l	vid_index		; ptr to frame size 16bits list
-idx_loaded	dc.l	play_index		; ptr to next frame to load
-load_ptr	dc.l	0	; start at vid_buffer
-play_ptr	dc.l	0	; video frame ptr
-	dc.w	0	; 32b align
-play_frm	dc.w	0	; video frame number
-aplay_ptr	dc.l	0	; audio frame ptr
-	dc.w	0	; 32b align
-aplay_frm	dc.w	0	; audio frame number
-play_offset
-	dc.l	0
-load_offset
-	dc.l	0
-size_toload
-	dc.l	0
-vid_buffer	dc.l	0
-vid_buffer_end
+;idx_play	dc.l	play_index		; ptr to next frame to play
+;idx_load	dc.l	vid_index		; ptr to frame size 16bits list
+;idx_loaded	dc.l	play_index		; ptr to next frame to load
+;load_ptr	dc.l	0	; start at vid_buffer
+;play_ptr	dc.l	0	; video frame ptr
+;	dc.w	0	; 32b align
+;play_frm	dc.w	0	; video frame number
+;aplay_ptr	dc.l	0	; audio frame ptr
+;	dc.w	0	; 32b align
+;aplay_frm	dc.w	0	; audio frame number
+;play_offset
+;	dc.l	0
+;load_offset
+;	dc.l	0
+;size_toload
+;	dc.l	0
+;vid_buffer	dc.l	0
+;vid_buffer_end
 	dc.l	0
 framecount
 	dc.w	SWITCH_FRAMES+322
@@ -1240,8 +1166,6 @@ swap_buffers
 
 s_vid_filename
 	dc.b	"AUDIO.DAT",0
-s_idx_filename
-	dc.b	"AUDIO.IDX",0
 s_debug_load
 	dc.b	"LOAD ",0
 s_debug_play
@@ -1262,14 +1186,14 @@ text	dc.b	"             "
 	dc.b	"      #C SO LET'S ENJOY SPEED AND COLORS WITH THIS SMALL INTRO! "
 	dc.b	"      -CREDITS-       MUSIC DDAMAGE     GFX ZONE     CODE FENARINARSA"
 	dc.b	"                "
-	dc.b	" SORRY FOR THE VIDEO AND AUDIO BUGS. #DHERE'S A FULL EXPLANATION WHY:         #KGUESS WHAT NO BLOODY ST EMULATOR KNOWS WHAT"
+	dc.b	" SORRY FOR THE VIDEO AND AUDIO BUGS. #DHERE'S A FULL EXPLANATION WHY:             #KGUESS WHAT NO BLOODY ST EMULATOR KNOWS WHAT"
 	dc.b	" A VGA CARD IS SO NO CROSSDEV FOR ME AND BOY I DIDN'T MISS DEV ON REAL HARDWARE AND TIME IS RUNNING OUT"
 	dc.b	" SO YES THERE'S AUDIO CRACKS AND SOME VIDEO GLITCHES, NOVA CARDS DON'T HAVE VSYNC INTERRUPT BECAUSE"
 	dc.b	" BASIC VGA CARDS ARE SLOW SHIT                  #C"
 	dc.b	" FOR SHORT IT'S A     #ASILLYVENTURE PARTY RELEASE #C         "
 	dc.b	" THE MUSIC IS A 50KHZ STEREO PCM STREAMED FROM HDD. YEAH IT'S BIG BUT #B----I KNOW---- #CYOU ALL HAVE COSMOSEX OR ULTRASATAN WITH ---UNUSED DISK SPACE---"
 	dc.b	"           THANKS TO JB FROM DDAMAGE FOR THE ORIGINAL TUNE BTW - MERCI MEC!                 "
-	dc.b	"           I DIDN'T CHOOSE THE PICTURES RANDOMLY - THIS INTRO IS ALSO A TRAILER OF WHO'S COMING NEXT FOR YOUR --STANDARD SHIFTER-- STE"
+	dc.b	"           I DIDN'T CHOSE THE PICTURES RANDOMLY - THIS INTRO IS ALSO A TRAILER OF WHAT'S COMING NEXT FOR YOUR STANDARD SHIFTER STE"
 	dc.b	"      FOLLOW ME #B  FENARINARSA ON TWITTER #C      IF YOU DON'T WANT TO MISS THE RELEASE. HOPEFULLY BEFORE CHRISTMAS!           LATER!      "
 	dc.b	"             #B "
 	dc.b	0
@@ -1321,12 +1245,17 @@ old_screen
 old_ints	ds.b	26
 old_palette
 	ds.w	16
-vid_index	ds.w	nb_frames+1
-play_index	ds.l	nb_frames+1
+;vid_index	ds.w	nb_frames+1
+;play_index	ds.l	nb_frames+1
 vgapal0	ds.l	256
 vgapal1	ds.l	256
 vgapal2	ds.l	256
 buf_nothing
 	ds.w	40
 buf_nothing_end
+
+
+
+audio_buffers
+	ds.l	BUFFERSIZE
 
