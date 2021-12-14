@@ -46,7 +46,7 @@ LStartH	EQU	$33
 LStartM	EQU	$C
 LStartL	EQU	$D
 
-emu	EQU	1	; 1=emulate HDD access timings by adding NOPs
+emu	EQU	0	; 1=emulate HDD access timings by adding NOPs
 ram_limit	EQU	1024*1024	; 0=no limit, other=malloc size
 blitter	EQU	1	; 1=use blitter 0=emulate blitter (not complete, for debug purpose only)
 minimum_load EQU	128*1000	; minimum size of a disk read (to optimize FREADs)
@@ -59,14 +59,14 @@ intro_shift EQU	0
 ;nb_frames	EQU	2332	; number of frames in file
 ;loop_frame EQU	111
 
-linewidth	EQU	320	; 640 for 640x480 and 320 for 320x240
+linewidth	EQU	640	; 640 for 640x480 and 320 for 320x240
 vidwidth	EQU	linewidth/4
 
 SWITCH_FRAMES EQU	880	; nb of frames between pictures swap 
-BUFFERSIZE EQU	100000	; nb of bytes for each audio buffer, there is 4 audio buffers (must be even for stereo)
+BUFFERSIZE EQU	200000	; nb of bytes for each audio buffer, there is 4 audio buffers (must be even for stereo)
 LOOPOFFSET EQU	0	; loop point in PCM file (must be even for stereo)
 
-VGA_ENABLE EQU	0
+VGA_ENABLE EQU	1
 
 DMASNDST	MACRO
 	;move.l	\1,d0
@@ -92,11 +92,11 @@ DMASNDED	MACRO
 
 emu_hdd_lag MACRO
 	IFNE	emu
-	move.l	d6,d5
+	move.l	#5000,d0
 .wait_emu	nop
 	nop
 	nop
-	dbra.s	d5,.wait_emu
+	dbra.s	d0,.wait_emu
 	ENDC
 	ENDM
 
@@ -222,8 +222,8 @@ hwinits
 	move.b	#%11,$ffff8901.w	; start playing sound (on a short empty buffer)
 
 	; setup play buffers idx to negative => "stalled"
-	move.w	#$ff00,current_play_buffer
-	move.w	#$ff00,next_play_buffer
+	;move.w	#$ff00,current_play_buffer
+	;move.w	#$ff00,next_play_buffer
 
 
 	IFNE	VGA_ENABLE
@@ -334,7 +334,8 @@ hwinits
 
 	ENDC
 
-	move.w	#$2300,sr
+	
+
 
 *** MAIN LOOP
 * the main loop is where the loading takes place
@@ -343,21 +344,22 @@ hwinits
 
 
 	; first load
-	move.w	#-1,b_loading
-	move.l	a4,-(sp)
-	move.l	#BUFFERSIZE*4,-(sp)
-	move.w	file_handle,-(sp)
-	move.w	#$3F,-(sp)		; fread
+;	move.w	#-1,b_loading
+;	move.l	#audio_buffers,-(sp)
+;	move.l	#BUFFERSIZE*4,-(sp)
+;	move.w	file_handle,-(sp)
+;	move.w	#$3F,-(sp)		; fread
 	;emu_hdd_lag
-	trap	#1
-	add.l	#12,sp
-	clr.w	b_loading
-	move.l	#$01010101,audio_buffer_status	; set all 4 buffers as loaded
+;	trap	#1
+;	add.l	#12,sp
+;	clr.w	b_loading
+;	move.l	#$01010101,audio_buffer_status	; set all 4 buffers as loaded
+	move.w	#$2300,sr
 
 	; enable Timer A
 	move.l	#timer_a,$134.w
 	move.b	#1,$fffffa1f.w
-	move.b	#8,$fffffa19.w
+	;move.b	#8,$fffffa19.w
 
 	; look for the first empty buffer
 check_buffer
@@ -375,7 +377,7 @@ check_buffer
 
 .found	; free buffer found, we are going to load it
 
-	;color_debug $400	; faint red
+	color_debug $400	; faint red
 	move.w	d6,d5
 	lsl.w	#2,d5
 	move.l	(a6,d5.w),a4	; get buffer ptr
@@ -385,7 +387,7 @@ check_buffer
 	move.l	#BUFFERSIZE,-(sp)
 	move.w	file_handle,-(sp)
 	move.w	#$3F,-(sp)		; fread
-	;emu_hdd_lag
+	emu_hdd_lag
 	trap	#1
 	add.l	#12,sp
 
@@ -413,7 +415,7 @@ check_buffer
 	move.l	d1,-(sp)
 	move.w	file_handle,-(sp)
 	move.w	#$3F,-(sp)		; fread
-	;emu_hdd_lag
+	emu_hdd_lag
 	trap	#1
 	add.l	#12,sp
 
@@ -422,7 +424,7 @@ check_buffer
 
 .loaded	clr.w	b_loading
 	move.b	#1,(a5,d6.w)	; set buffer as loaded
-	;color_debug $000	; black
+	color_debug $fff	; white
 	bsr	check_ikbd
 	bra	check_buffer
 
@@ -552,17 +554,17 @@ timer_a	move.b	#1,$fffffa1f.w
 
 .end_ta	movem.l	(sp)+,d0-d2/a0
 	color_debug $FFF
-	vga_debug $00,$00,$00
+	;vga_debug $00,$00,$00
 	rte
 
 .notloaded
 	; the next buffer is not yet loaded. We load the dummy buffer and mark the play as stalled.
 	or.w	#$ff00,d1
-	move.b	d1,next_play_buffer
+	move.w	d1,next_play_buffer
 	move.l	#buf_nothing_end,d0
 	DMASNDED
 	move.l	#buf_nothing,d0
-	DMASNDED
+	DMASNDST
 	bra.s	.end_ta
 
 
@@ -717,6 +719,8 @@ set_videoaddr
 scrolltext
 	;move.w	#22,textshift
 
+	lea	$ffff8a3c.w,a3
+	move.b	#7,d7
 	; setup static blitter registers
 	move.w	#2,$ffff8a20.w   ; src x byte increment
 	move.w	#2,$ffff8a2e.w ; dst x increment
@@ -732,7 +736,7 @@ scrolltext
 	lea	fontidx,a4
 	moveq	#11,d7
 	move.w	textshift,d6
-	beq.s	.middle
+	beq	.middle
 	cmp.w	#18,d6
 	bge.s	.firstchar
 	moveq	#10,d7
@@ -766,10 +770,10 @@ scrolltext
 	move.w	d3,$ffff8a30.w ; dst y increment
 	move.l	a0,$ffff8a24.w   ; src
 	move.l	a6,$ffff8a32.w   ; dest
-	move.b	#%11000000,$ffff8a3c.w ; start HOG
+	;move.b	#%11000000,(a3) ; start HOG
 	nop
 	nop
-	
+
 	add.w	d4,a6	; next char on screen
 	
 	; 11 or 12  middle chars
@@ -791,10 +795,19 @@ scrolltext
 	move.w	#2+linewidth-26,$ffff8a30.w ; dst y increment
 	move.l	a0,$ffff8a24.w   ; src
 	move.l	a6,$ffff8a32.w   ; dest
-	move.b	#%11000000,$ffff8a3c.w ; start HOG
+	;move.b	#%11000000,(a3) ; start HOG
 	nop
 	nop
-	
+
+	move.l	a6,a1
+	moveq	#24,d5
+.loop1	REPT	13
+	move.w	(a0)+,(a1)+
+	ENDR
+	lea	1536-26(a0),a0
+	lea	linewidth-26(a1),a1
+	dbra	d5,.loop1
+
 	add.w	#26,a6
 	dbra	d7,.loopchar
 	
@@ -830,7 +843,7 @@ scrolltext
 	move.w	d3,$ffff8a30.w ; dst y increment
 	move.l	a0,$ffff8a24.w   ; src
 	move.l	a6,$ffff8a32.w   ; dest
-	move.b	#%11000000,$ffff8a3c.w ; start HOG
+	;move.b	#%11000000,(a3) ; start HOG
 	nop
 	nop
 
@@ -929,13 +942,13 @@ audio_buffer_ptr
 	dc.l	audio_buffers+2*BUFFERSIZE
 	dc.l	audio_buffers+3*BUFFERSIZE
 audio_buffer_status
-	dc.b	0,0,0,0
+	dc.b	0,0,1,1
 current_play_buffer
-	dc.w	-1
+	dc.w	2
 next_play_buffer
-	dc.w	0
-next_load_buffer
-	dc.w	0
+	dc.w	3
+;next_load_buffer
+;	dc.w	0
 
 framecount
 	dc.w	SWITCH_FRAMES+322
