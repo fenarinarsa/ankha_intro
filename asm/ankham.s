@@ -34,6 +34,11 @@
 ; note: adding $FE000000 to VME addresses
 ; should them TT compatible without breaking
 ; things on Mega STE... I think?
+
+MACH32	EQU	1	; 0=ET4000 / 1=MACH32
+
+	IFEQ	MACH32
+	; ET4000
 SCREEN	EQU	$FEC00000
 DAC_PEL	EQU	$FEDC03C6
 DAC_IR	EQU	$FEDC03C7
@@ -45,6 +50,18 @@ INSTATUS1	EQU	$FEDC03DA
 LStartH	EQU	$33
 LStartM	EQU	$C
 LStartL	EQU	$D
+	ELSE
+	; Mach32
+SCREEN	EQU	$FEA00000
+DISP_STATUS EQU	$FED002E8
+DAC_IR	EQU	$FED002EB
+DAC_IW	EQU	$FED002EC
+DAC_D	EQU	$FED002ED
+CRT_OFFSET_LO EQU	$FED02AEE
+CRT_OFFSET_HI EQU	$FED02EEE
+GE_OFFSET_LO EQU	$FED076EE
+GE_OFFSET_HI EQU	$FED07AEE
+	ENDC
 
 emu	EQU	0	; 1=emulate HDD access timings by adding NOPs
 ram_limit	EQU	1024*1024	; 0=no limit, other=malloc size
@@ -62,11 +79,12 @@ intro_shift EQU	0
 linewidth	EQU	640	; 640 for 640x480 and 320 for 320x240
 vidwidth	EQU	linewidth/4
 
-SWITCH_FRAMES EQU	880	; nb of frames between pictures swap 
+SWITCH_FRAMES EQU	100; 880	; nb of frames between pictures swap 
 BUFFERSIZE EQU	200000	; nb of bytes for each audio buffer, there is 4 audio buffers (must be even for stereo)
 LOOPOFFSET EQU	0	; loop point in PCM file (must be even for stereo)
 
-VGA_ENABLE EQU	1
+VGA_ENABLE EQU	1	; enable VGA rendering
+AUDIO_ENABLE EQU	0	; enable audio stream loading
 
 DMASNDST	MACRO
 	;move.l	\1,d0
@@ -142,7 +160,7 @@ vga_debug	MACRO
 	trap	#1
 	addq.w	#6,sp
 
-	
+	IFNE	AUDIO_ENABLE
 	*** Open audio pcm file
 	move.w	#0,-(sp)		; open video
 	pea	s_vid_filename
@@ -153,6 +171,7 @@ vga_debug	MACRO
 	ble	file_error		; file not found
 
 	move.w	d0,file_handle
+	ENDC
 
 	move.w	#2,-(sp)		; physaddr
 	trap	#14
@@ -173,8 +192,9 @@ hwinits
 	movem.l	d0-d7,old_palette
 
 	;move.b	$ffff8260.w,old_rez
-	;move.b	$ffff820a.w,old_hz
-	moveq	#0,d5		; reset vbl counter
+	move.b	$ffff820a.w,old_hz
+	move.b 	#1,$FFFF820A.w	; external sync
+	;moveq	#0,d5		; reset vbl counter
 
 	lea	old_ints,a0
 	move.l	$68.w,(a0)+
@@ -311,6 +331,8 @@ hwinits
 	move.b	#%11000000,$ffff8a3c.w ; start HOG
 	nop
 	nop
+
+
 	
 	; shift the font colors by 240 except for color #0 (for debug)
 	move.l	fontidx,a0
@@ -334,32 +356,20 @@ hwinits
 
 	ENDC
 
-	
-
+	; init video address
+	bsr	set_videoaddr
 
 *** MAIN LOOP
 * the main loop is where the loading takes place
 * with a FIFO (cyclic) buffer
 * main rendering takes place in the HBL interrupt
 
-
-	; first load
-;	move.w	#-1,b_loading
-;	move.l	#audio_buffers,-(sp)
-;	move.l	#BUFFERSIZE*4,-(sp)
-;	move.w	file_handle,-(sp)
-;	move.w	#$3F,-(sp)		; fread
-	;emu_hdd_lag
-;	trap	#1
-;	add.l	#12,sp
-;	clr.w	b_loading
-;	move.l	#$01010101,audio_buffer_status	; set all 4 buffers as loaded
 	move.w	#$2300,sr
 
 	; enable Timer A
 	move.l	#timer_a,$134.w
 	move.b	#1,$fffffa1f.w
-	;move.b	#8,$fffffa19.w
+	move.b	#8,$fffffa19.w
 
 	; look for the first empty buffer
 check_buffer
@@ -383,6 +393,7 @@ check_buffer
 	move.l	(a6,d5.w),a4	; get buffer ptr
 
 	move.w	#-1,b_loading
+	IFNE	AUDIO_ENABLE
 	move.l	a4,-(sp)
 	move.l	#BUFFERSIZE,-(sp)
 	move.w	file_handle,-(sp)
@@ -390,6 +401,9 @@ check_buffer
 	emu_hdd_lag
 	trap	#1
 	add.l	#12,sp
+	ELSE
+	move.l	#BUFFERSIZE,d0
+	ENDC
 
 	tst.l	d0
 	blt	demo_end		; stop if file error
@@ -440,10 +454,12 @@ check_ikbd
 *** END
 
 demo_end	
+	IFNE	AUDIO_ENABLE
 	*** Close audio file
 	move.w	file_handle,-(sp)
 	move.w	#$3e,-(sp)
 	addq.l	#4,sp
+	ENDC
 
 	*** Hardware restore
 	move.w	#$2700,sr
@@ -458,7 +474,7 @@ demo_end
 	movem.l	old_palette,d0-d7
 	movem.l	d0-d7,$ffff8240.w
 	;move.b	old_rez,$ffff8260.w
-	;move.b	old_hz,$ffff820a.w
+	move.b	old_hz,$ffff820a.w
 	IFNE	VGA_ENABLE
 	move.l	old_screen,vid0_ptr
 	bsr	set_videoaddr
@@ -580,18 +596,15 @@ tb_render	sub.w	#1,framecount
 	;bsr	set_videoaddr	; must be done BEFORE vsync
 
 	; wait for vsync
-	btst	#3,INSTATUS1
-	bne.s	.invsync
-.waitvsync
-	btst	#3,INSTATUS1
-	beq.s	.waitvsync
+	bsr	vsync
 
-.invsync	sf	$fffffa1b.w	; stop TB
+	sf	$fffffa1b.w	; stop TB
 	move.b	#198,$fffffa21.w	; counter=200
 	move.b	#7,$fffffa1b.w	; divider=200
 	;rte
 	tst.w	b_lock_render
 	bne.s	.locked		; don't enable HBL if a render is already in progress
+	bra.s	hbl	; debug without sync
 	and.w	#$f0ff,(sp)
 	or.w	#$0100,(sp)	; enable HBL after rte
 .locked
@@ -674,17 +687,23 @@ prepare_palette
 	move.b	(a0)+,d2
 	move.b	(a0),d3
 	addq	#2,a0
+	IFEQ	MACH32
+	; ET4000 = 6bits components
 	lsr.b	#2,d1
 	lsr.b	#2,d2
 	lsr.b	#2,d3
+	ENDC
 	move.b	d3,(a1)+	; write R
 	move.b	d2,(a1)+	; write G
 	move.b	d1,(a1)+	; write B
 	dbra	d0,.pal
 	rts
 	
-set_palette	
+set_palette
+	IFEQ	MACH32
+	; ET4000
 	move.b	#$FF,DAC_PEL ; pixel mask
+	ENDC
 	move.w	#255,d0
 	move.l	pal0,a0
 	move.b	#0,DAC_IW	; start pal index #0
@@ -695,31 +714,54 @@ set_palette
 	rts
 
 	; poll vsync bit
-vsync	btst	#3,INSTATUS1
+vsync
+	IFEQ	MACH32
+	; ET4000
+	btst	#3,INSTATUS1
 	bne.s	vsync
 .vs	btst	#3,INSTATUS1
 	beq.s	.vs
+	ELSE
+	; Mach32
+	btst	#1,DISP_STATUS
+	bne.s	vsync
+.vs	btst	#1,DISP_STATUS
+	beq.s	.vs
+	ENDC
 	rts
 
 	; set screen base address
 set_videoaddr
+	IFEQ	MACH32
+	; ET4000
 	move.b	#LStartL,CRTC_I
 	move.b	vid0_ptr+3,CRTC_D
 	move.b	#LStartM,CRTC_I
 	move.b	vid0_ptr+2,CRTC_D
 	move.b	#LStartH,CRTC_I
 	move.b	vid0_ptr+1,CRTC_D
+	ELSE
+	; Mach32
+	move.l	vid0_ptr,d0
+	sub.l	#SCREEN,d0
+	move.w	d0,d1
+	lsl.w	#8,d0
+	lsr.w	#8,d1
+	or.w	d1,d0
+	move.w	d0,CRT_OFFSET_LO
+	swap	d0
+	lsl.w	#8,d0
+	move.w	d0,CRT_OFFSET_HI
+	ENDC
 	rts
 	
 *** SCROLLTEXT
-; 100% blitter
 ; each char is copied individually on screen
 ; a bit complex because the chars are 26px wide ToT
 
 scrolltext
 	;move.w	#22,textshift
 
-	lea	$ffff8a3c.w,a3
 	move.b	#7,d7
 	; setup static blitter registers
 	move.w	#2,$ffff8a20.w   ; src x byte increment
@@ -754,6 +796,7 @@ scrolltext
 	move.l	(a4,d0.w),a0	; char ptr	
 	add.w	d6,a0	; add text shift
 
+	IFNE	blitter
 	moveq	#26,d1
 	sub.w	d6,d1
 	move.w	d1,d4
@@ -770,9 +813,30 @@ scrolltext
 	move.w	d3,$ffff8a30.w ; dst y increment
 	move.l	a0,$ffff8a24.w   ; src
 	move.l	a6,$ffff8a32.w   ; dest
-	;move.b	#%11000000,(a3) ; start HOG
+	move.b	#%11000000,$ffff8a3c.w ; start HOG
 	nop
 	nop
+
+	ELSE	; software
+	moveq	#26,d1
+	sub.w	d6,d1
+	move.w	d1,d4
+	move.w	#1536,d2
+	sub.w	d1,d2
+	move.w	#linewidth,d3
+	sub.w	d1,d3
+	lsr.w	#1,d1
+	subq	#1,d1
+
+	move.l	a6,a1
+	moveq	#24,d5
+.loop0Y	move.w	d1,d0
+.loop0X	move.w	(a0)+,(a1)+
+	dbra	d0,.loop0X
+	adda.w	d2,a0
+	adda.w	d3,a1
+	dbra	d5,.loop0Y
+	ENDC
 
 	add.w	d4,a6	; next char on screen
 	
@@ -788,6 +852,7 @@ scrolltext
 	lsl.w	#2,d0
 	move.l	(a4,d0.w),a0	; char ptr
 
+	IFNE	blitter
 	; copy 1 char to video RAM with the blitter
 	move.w	#25,$ffff8a38.w ; y count
 	move.w	#13,$ffff8a36.w  ; x word count
@@ -795,18 +860,23 @@ scrolltext
 	move.w	#2+linewidth-26,$ffff8a30.w ; dst y increment
 	move.l	a0,$ffff8a24.w   ; src
 	move.l	a6,$ffff8a32.w   ; dest
-	;move.b	#%11000000,(a3) ; start HOG
+	move.b	#%11000000,$ffff8a3c.w ; start HOG
 	nop
 	nop
-
+	ELSE	; software
 	move.l	a6,a1
 	moveq	#24,d5
-.loop1	REPT	13
+.loop1	movem.l	(a0)+,d0-d4/a3
+	movem.l	d0-d4/a3,(a1)
+	lea	24(a1),a1
 	move.w	(a0)+,(a1)+
-	ENDR
+;	REPT	13
+;	move.w	(a0)+,(a1)+
+;	ENDR
 	lea	1536-26(a0),a0
 	lea	linewidth-26(a1),a1
 	dbra	d5,.loop1
+	ENDC
 
 	add.w	#26,a6
 	dbra	d7,.loopchar
@@ -825,12 +895,15 @@ scrolltext
 	lsl.w	#2,d0
 	move.l	(a4,d0.w),a0	; char ptr	
 
+
 	moveq	#8,d1
 	add.w	d6,d1
 	cmp.w	#26,d1
 	blt.s	.noovflow
 	sub.w	#26,d1
-.noovflow	move.w	#2+1536,d2
+.noovflow	
+	IFNE	blitter
+	move.w	#2+1536,d2
 	sub.w	d1,d2	; src y byte increment
 	move.w	#2+linewidth,d3
 	sub.w	d1,d3	; dst y increment
@@ -843,9 +916,27 @@ scrolltext
 	move.w	d3,$ffff8a30.w ; dst y increment
 	move.l	a0,$ffff8a24.w   ; src
 	move.l	a6,$ffff8a32.w   ; dest
-	;move.b	#%11000000,(a3) ; start HOG
+	move.b	#%11000000,$ffff8a3c.w ; start HOG
 	nop
 	nop
+
+	ELSE	; software
+	move.w	#1536,d2
+	sub.w	d1,d2
+	move.w	#linewidth,d3
+	sub.w	d1,d3
+	lsr.w	#1,d1
+	subq	#1,d1
+
+	move.l	a6,a1
+	moveq	#24,d5
+.loop2Y	move.w	d1,d0
+.loop2X	move.w	(a0)+,(a1)+
+	dbra	d0,.loop2X
+	adda.w	d2,a0
+	adda.w	d3,a1
+	dbra	d5,.loop2Y
+	ENDC
 
 .shifttext	
 	move.b	(a5)+,d0
@@ -1017,6 +1108,7 @@ Save_Mfp	ds.l	16
 Save_Vec	ds.l	17
 old_screen
 	ds.l	1
+old_hz	ds.w	1
 old_ints	ds.b	26
 old_palette
 	ds.w	16
@@ -1030,3 +1122,4 @@ buf_nothing_end
 audio_buffers
 	ds.l	BUFFERSIZE
 
+endend
